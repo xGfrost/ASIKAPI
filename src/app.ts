@@ -60,3 +60,6 @@ export function makeApp() {
   app.use(errorHandler);
   return app;
 }
+
+const app = makeApp();
+export default app;
