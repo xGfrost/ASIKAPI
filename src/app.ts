@@ -1,13 +1,20 @@
+// src/app.ts
 import express from "express";
-import helmet from "helmet";
 import { createRequire } from "node:module";
+
+// --- CJS packages via require (aman di ESM/NodeNext)
 const require = createRequire(import.meta.url);
 const compression = require("compression") as typeof import("compression");
 const cors = require("cors") as typeof import("cors");
 const morgan = require("morgan") as typeof import("morgan");
 
+// --- Helmet: tahan banting untuk ESM/CJS perbedaan typings
+import * as helmetModule from "helmet";
+// ambil default jika tersedia, fallback ke modulnya sendiri
+const helmet: (options?: any) => import("express").RequestHandler =
+  ((helmetModule as any).default ?? (helmetModule as any));
 
-
+// --- Local imports (pakai .js karena NodeNext)
 import { errorHandler } from "./middleware/error.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/users.routes.js";
@@ -28,7 +35,7 @@ export function makeApp() {
   const app = express();
 
   app.use(cors());
-  app.use(helmet());
+  app.use(helmet()); // ✅ sekarang callable di Vercel
   app.use(compression());
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("dev"));
@@ -38,18 +45,17 @@ export function makeApp() {
   app.use("/auth", authRoutes);
   app.use("/users", userRoutes);
   app.use("/psychologists", psychologistRoutes);
-  app.use(consultationRoutes);         // base di file: /consultations
-  app.use(streamRoutes);               // base di file: /consultations/:id/stream-channel
+  app.use(consultationRoutes);
+  app.use(streamRoutes);
   app.use("/payments", paymentRoutes);
-  app.use("/reviews", reviewRoutes);   // berisi endpoints berbasis /consultations/:id/reviews
+  app.use("/reviews", reviewRoutes);
   app.use("/specialties", specialtyRoutes);
-  app.use(availabilityRoutes);         // /psychologists/:id/availabilities & /availabilities/:id
-
+  app.use(availabilityRoutes);
   app.use(intakeRoutes);
-app.use(aiIntakeRoutes);
-app.use(aiNotesRoutes);
-app.use(dashboardRoutes);
-app.use(utilitiesRoutes);
+  app.use(aiIntakeRoutes);
+  app.use(aiNotesRoutes);
+  app.use(dashboardRoutes);
+  app.use(utilitiesRoutes);
 
   app.use(errorHandler);
   return app;
