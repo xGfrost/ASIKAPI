@@ -1,47 +1,77 @@
+// src/controllers/stream_channels.controller.ts
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
 
+function toBigInt(v: any): bigint {
+  if (typeof v === "bigint") return v;
+  if (typeof v === "number") return BigInt(v);
+  if (typeof v === "string" && v.length > 0) return BigInt(v);
+  return BigInt(v);
+}
+
 // POST /consultations/:id/stream-channel
+// System attaches/updates stream channel id untuk konsultasi (tanpa role check)
 export async function attachStreamChannel(req: Request, res: Response) {
-    if (!req.params.id) return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  try {
+    if (!req.params.id) {
+      return res.status(400).json({ error: { message: "Consultation ID is required" } });
+    }
+    const id = toBigInt(req.params.id);
 
-  const id = BigInt(req.params.id);
-  const actor = (req as any).user;
+    // pastikan konsultasi ada
+    const exists = await prisma.consultations.findUnique({ where: { id } });
+    if (!exists) {
+      return res.status(404).json({ error: { message: "Consultation not found" } });
+    }
 
-  const c = await prisma.consultations.findUnique({ where: { id } });
-  if (!c) return res.status(404).json({ error: { message: "Consultation not found" } });
+    const { stream_channel_id, stream_type } = req.body as {
+      stream_channel_id?: string;
+      stream_type?: string;
+    };
 
-  if (actor.role !== "admin" && !(actor.role === "psychologist" && actor.id === c.psychologist_id)) {
-    return res.status(403).json({ error: { message: "Forbidden" } });
+    if (!stream_channel_id || typeof stream_channel_id !== "string" || !stream_channel_id.trim()) {
+      return res.status(400).json({ error: { message: "stream_channel_id is required" } });
+    }
+
+    const payload = {
+      stream_channel_id: stream_channel_id.trim(),
+      stream_type: (stream_type ?? "").trim() || null,
+    };
+
+    // kalau sudah ada untuk consultation ini → update, else create
+    const existing = await prisma.stream_channels.findUnique({ where: { consultation_id: id } });
+    const sc = existing
+      ? await prisma.stream_channels.update({
+          where: { consultation_id: id },
+          data: payload,
+        })
+      : await prisma.stream_channels.create({
+          data: { consultation_id: id, ...payload },
+        });
+
+    // 201 kalau create, 200 kalau update (opsional)
+    return res.status(existing ? 200 : 201).json({ stream_channel: sc });
+  } catch (err: any) {
+    return res.status(500).json({ error: { message: err?.message || "Internal server error" } });
   }
-
-  const { stream_channel_id, stream_type } = req.body as { stream_channel_id: string; stream_type?: string };
-  if (!stream_channel_id) return res.status(400).json({ error: { message: "stream_channel_id is required" } });
-
-  const sc = await prisma.stream_channels.upsert({
-    where: { consultation_id: id },
-    update: { stream_channel_id, stream_type },
-    create: { consultation_id: id, stream_channel_id, stream_type }
-  });
-
-  res.status(201).json({ stream_channel: sc });
 }
 
 // GET /consultations/:id/stream-channel
+// System (atau klien) ambil info stream channel tanpa role check
 export async function getStreamChannel(req: Request, res: Response) {
-    if (!req.params.id) return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  try {
+    if (!req.params.id) {
+      return res.status(400).json({ error: { message: "Consultation ID is required" } });
+    }
+    const id = toBigInt(req.params.id);
 
-  const id = BigInt(req.params.id);
-  const actor = (req as any).user;
-
-  const c = await prisma.consultations.findUnique({ where: { id }, select: { patient_id: true, psychologist_id: true } });
-  if (!c) return res.status(404).json({ error: { message: "Consultation not found" } });
-
-  if (!(actor.role === "admin" || actor.id === c.patient_id || actor.id === c.psychologist_id)) {
-    return res.status(403).json({ error: { message: "Forbidden" } });
+    // langsung cari by consultation_id
+    const sc = await prisma.stream_channels.findUnique({ where: { consultation_id: id } });
+    if (!sc) {
+      return res.status(404).json({ error: { message: "Stream channel not found" } });
+    }
+    return res.json({ stream_channel: sc });
+  } catch (err: any) {
+    return res.status(500).json({ error: { message: err?.message || "Internal server error" } });
   }
-
-  const sc = await prisma.stream_channels.findUnique({ where: { consultation_id: id } });
-  if (!sc) return res.status(404).json({ error: { message: "Stream channel not found" } });
-  res.json({ stream_channel: sc });
 }

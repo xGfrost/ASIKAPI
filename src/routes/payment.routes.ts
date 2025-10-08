@@ -5,42 +5,21 @@ import {
   listPayments,
   getPaymentById,
   updatePaymentStatus,
-  paymentWebhook
+  paymentWebhook,
 } from "../controllers/payments.controller.js";
 
 const r = Router();
 
 /**
- * POST /payments
- *  - Buat pembayaran untuk konsultasi (user login)
- *  - body: { consultation_id, method, amount }
+ * Webhook dari payment gateway (biasanya TANPA auth).
+ * Penting: taruh SEBELUM `/:id` agar tidak ketabrak param id.
  */
-r.post("/payments", requireAuth(), createPayment);
+r.post("/webhook", paymentWebhook);
 
-/**
- * GET /payments
- *  - List pembayaran user login; Admin: semua
- *  - query opsional: status, consultation_id
- */
-r.get("/payments", requireAuth(), listPayments);
-
-/**
- * GET /payments/:id
- *  - Detail pembayaran (pemilik atau admin)
- */
-r.get("/payments/:id", requireAuth(), getPaymentById);
-
-/**
- * PUT /payments/:id
- *  - Update status pembayaran (admin atau gateway callback “internal”)
- *  - body: { status: "pending"|"paid"|"failed", paid_at?: ISOString }
- */
-r.put("/payments/:id", requireAuth(["admin"]), updatePaymentStatus);
-
-/**
- * POST /payments/webhook
- *  - Endpoint webhook (tanpa auth) dari payment gateway
- */
-r.post("/payments/webhook", paymentWebhook);
+/** CRUD pembayaran */
+r.post("/", requireAuth(), createPayment);               // POST /payments
+r.get("/", requireAuth(), listPayments);                  // GET  /payments
+r.get("/:id", requireAuth(), getPaymentById);             // GET  /payments/:id
+r.put("/:id", requireAuth(["admin"]), updatePaymentStatus); // PUT  /payments/:id
 
 export default r;

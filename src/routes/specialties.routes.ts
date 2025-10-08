@@ -4,16 +4,17 @@ import {
   listSpecialties,
   adminCreateSpecialty,
   assignPsychologistSpecialties,
-  removePsychologistSpecialty
+  removePsychologistSpecialty,
 } from "../controllers/specialties.controller.js";
 
 const r = Router();
 
-r.get("/", listSpecialties);
-r.post("/", requireAuth(["admin"]), adminCreateSpecialty);
+// specialties master
+r.get("/specialties", listSpecialties);
+r.post("/specialties", requireAuth(["admin"]), adminCreateSpecialty);
 
-// Assign / Remove
-r.post("/psychologists/:id/specialties", requireAuth(["admin"]), assignPsychologistSpecialties);
-r.delete("/psychologists/:id/specialties/:sid", requireAuth(["admin"]), removePsychologistSpecialty);
+// assign specialties ke psikolog
+r.post("/psychologists/:id/specialties", requireAuth(["admin", "psychologist"]), assignPsychologistSpecialties);
+r.delete("/psychologists/:id/specialties/:sid", requireAuth(["admin", "psychologist"]), removePsychologistSpecialty);
 
 export default r;

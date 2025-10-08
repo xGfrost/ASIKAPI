@@ -3,15 +3,14 @@ import { requireAuth } from "../middleware/auth.js";
 import {
   createReviewForConsultation,
   getConsultationReviews,
-  getPsychologistReviews, // ⬅️ baru
+  getPsychologistReviews,
 } from "../controllers/reviews.controller.js";
 
 const r = Router();
 
 /**
  * POST /consultations/:id/reviews
- * - Tambah ulasan setelah konsultasi selesai (patient/admin)
- * - body: { rating: 1..5, comment?: string }
+ *  - patient pemilik konsultasi / admin
  */
 r.post(
   "/consultations/:id/reviews",
@@ -21,19 +20,20 @@ r.post(
 
 /**
  * GET /consultations/:id/reviews
- * - Ambil ulasan untuk konsultasi tertentu (auth mengikuti logika existing)
  */
 r.get(
   "/consultations/:id/reviews",
-  requireAuth(),
+  requireAuth(), // siapa pun yang login boleh lihat
   getConsultationReviews
 );
 
 /**
  * GET /psychologists/:id/reviews
- * - Ambil semua ulasan untuk psikolog (PUBLIC sesuai requirement)
- *   (kalau kamu ingin pakai auth, tinggal bungkus dengan requireAuth())
  */
-r.get("/psychologists/:id/reviews", getPsychologistReviews);
+r.get(
+  "/psychologists/:id/reviews",
+  requireAuth(), // siapa pun yang login boleh lihat
+  getPsychologistReviews
+);
 
 export default r;

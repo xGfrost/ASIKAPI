@@ -48,8 +48,8 @@ export function makeApp() {
   app.use(consultationRoutes);
   app.use(streamRoutes);
   app.use("/payments", paymentRoutes);
-  app.use("/reviews", reviewRoutes);
-  app.use("/specialties", specialtyRoutes);
+  app.use(reviewRoutes); // ⬅️ tidak ada prefix supaya path-nya persis seperti requirement
+  app.use(specialtyRoutes);
   app.use(availabilityRoutes);
   app.use(intakeRoutes);
   app.use(aiIntakeRoutes);
