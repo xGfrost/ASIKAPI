@@ -4,6 +4,26 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+async function clearDatabase() {
+  console.log("🧹 Clearing all tables...");
+
+  // urutan aman dari relasi paling dalam ke paling atas
+  await prisma.ai_consultation_notes.deleteMany({});
+  await prisma.ai_intake_analysis.deleteMany({});
+  await prisma.intake_forms.deleteMany({});
+  await prisma.stream_channels.deleteMany({});
+  await prisma.payments.deleteMany({});
+  await prisma.reviews.deleteMany({});
+  await prisma.consultations.deleteMany({});
+  await prisma.availabilities.deleteMany({});
+  await prisma.psychologist_specialties.deleteMany({});
+  await prisma.specialties.deleteMany({});
+  await prisma.psychologists.deleteMany({});
+  await prisma.users.deleteMany({});
+
+  console.log("✅ All tables cleared.");
+}
+
 async function upsertSpecialties(names: string[]) {
   const result = [];
   for (const name of names) {
@@ -19,16 +39,16 @@ async function upsertSpecialties(names: string[]) {
 
 async function createPsychologistUser(opts: {
   full_name: string;
+  image?: string;
   email: string;
   license_no: string;
   bio: string;
   price_chat: number;
   price_video: number;
-  specialties: string[]; // by name
+  specialties: string[];
 }) {
   const password = await bcrypt.hash("password123", 10);
 
-  // user
   const user = await prisma.users.create({
     data: {
       role: "psychologist",
@@ -36,10 +56,12 @@ async function createPsychologistUser(opts: {
       email: opts.email,
       password,
       gender: "other",
+      image:
+        opts.image ||
+        "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
     },
   });
 
-  // psychologist profile (PK = users.id)
   const psy = await prisma.psychologists.create({
     data: {
       id: user.id,
@@ -52,7 +74,6 @@ async function createPsychologistUser(opts: {
     },
   });
 
-  // map specialties by name
   for (const name of opts.specialties) {
     const spec = await prisma.specialties.findUnique({ where: { name } });
     if (spec) {
@@ -74,24 +95,29 @@ async function createPatientUser(full_name: string, email: string) {
       email,
       password,
       gender: "other",
+      image:
+        "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
     },
   });
   return u;
 }
 
 async function main() {
-  console.log("🌱 Seeding...");
+  console.log("🌱 Starting seed...");
+
+  // --- Bersihkan semua tabel terlebih dahulu
+  await clearDatabase();
 
   // --- Admin
-  const admin = await prisma.users.upsert({
-    where: { email: "admin@asik.local" },
-    update: {},
-    create: {
+  const admin = await prisma.users.create({
+    data: {
       role: "admin",
       full_name: "Admin ASIK",
       email: "admin@asik.local",
       password: await bcrypt.hash("admin123", 10),
       gender: "other",
+      image:
+        "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
     },
   });
 
@@ -109,6 +135,8 @@ async function main() {
   // --- Psychologists
   const psy1 = await createPsychologistUser({
     full_name: "Dr. Sinta Pramudita, M.Psi, Psikolog",
+    image:
+      "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
     email: "sinta@asik.local",
     license_no: "PSI-001-2020",
     bio: "Fokus pada kecemasan & depresi. CBT & ACT.",
@@ -137,10 +165,9 @@ async function main() {
     specialties: ["Child & Adolescent", "Couples"],
   });
 
-  // --- Availabilities (pakai tanggal dummy untuk kolom TIME)
+  // --- Availabilities
   await prisma.availabilities.createMany({
     data: [
-      // Psy1: Senin & Rabu 09:00-12:00
       {
         psychologist_id: psy1.psy.id,
         weekday: 1,
@@ -153,14 +180,12 @@ async function main() {
         start_time: new Date("1970-01-01T09:00:00Z"),
         end_time: new Date("1970-01-01T12:00:00Z"),
       },
-      // Psy2: Selasa 13:00-17:00
       {
         psychologist_id: psy2.psy.id,
         weekday: 2,
         start_time: new Date("1970-01-01T13:00:00Z"),
         end_time: new Date("1970-01-01T17:00:00Z"),
       },
-      // Psy3: Kamis 10:00-14:00
       {
         psychologist_id: psy3.psy.id,
         weekday: 4,
@@ -168,18 +193,16 @@ async function main() {
         end_time: new Date("1970-01-01T14:00:00Z"),
       },
     ],
-    skipDuplicates: true,
   });
 
   // --- Patients
   const pat1 = await createPatientUser("Budi Santoso", "budi@asik.local");
   const pat2 = await createPatientUser("Maya Kartika", "maya@asik.local");
 
-  // --- Consultations (1 completed + 1 scheduled)
+  // --- Consultations
   const now = new Date();
   const plusHours = (h: number) => new Date(now.getTime() + h * 3600 * 1000);
 
-  // Completed consultation: pat1 with psy1
   const cons1 = await prisma.consultations.create({
     data: {
       patient_id: pat1.id,
@@ -187,13 +210,12 @@ async function main() {
       channel: "video",
       status: "completed",
       scheduled_start_at: new Date(now.getTime() - 72 * 3600 * 1000),
-      scheduled_end_at: new Date(now.getTime() - 72 * 3600 * 1000 + 60 * 60 * 1000),
+      scheduled_end_at: new Date(now.getTime() - 71 * 3600 * 1000),
       price: psy1.psy.price_video,
       patient_notes: "Sering cemas saat kerja dan sulit tidur.",
     },
   });
 
-  // Scheduled consultation: pat2 with psy2 (besok)
   const cons2 = await prisma.consultations.create({
     data: {
       patient_id: pat2.id,
@@ -208,37 +230,36 @@ async function main() {
   });
 
   // --- Payments
-  await prisma.payments.create({
-    data: {
-      consultation_id: cons1.id,
-      amount: psy1.psy.price_video,
-      method: "transfer",
-      status: "paid",
-      paid_at: new Date(now.getTime() - 70 * 3600 * 1000),
-      external_id: "INV-0001",
-    },
+  await prisma.payments.createMany({
+    data: [
+      {
+        consultation_id: cons1.id,
+        amount: psy1.psy.price_video,
+        method: "transfer",
+        status: "paid",
+        paid_at: new Date(now.getTime() - 70 * 3600 * 1000),
+        external_id: "INV-0001",
+      },
+      {
+        consultation_id: cons2.id,
+        amount: psy2.psy.price_chat,
+        method: "qris",
+        status: "pending",
+        external_id: "INV-0002",
+      },
+    ],
   });
 
-  await prisma.payments.create({
-    data: {
-      consultation_id: cons2.id,
-      amount: psy2.psy.price_chat,
-      method: "qris",
-      status: "pending",
-      external_id: "INV-0002",
-    },
-  });
-
-  // --- Stream channel contoh
+  // --- Stream Channel
   await prisma.stream_channels.create({
     data: {
       consultation_id: cons2.id,
-      stream_channel_id: "asik-chat-" + String(cons2.id),
+      stream_channel_id: `asik-chat-${cons2.id}`,
       stream_type: "chat",
     },
   });
 
-  // --- Intake form & AI intake analysis (untuk cons1)
+  // --- Intake Form + AI Analysis
   const intake1 = await prisma.intake_forms.create({
     data: {
       consultation_id: cons1.id,
@@ -265,7 +286,7 @@ async function main() {
     },
   });
 
-  // --- AI consultation notes (untuk cons1)
+  // --- AI Consultation Notes
   await prisma.ai_consultation_notes.create({
     data: {
       consultation_id: cons1.id,
@@ -273,15 +294,17 @@ async function main() {
       patient_id: pat1.id,
       notes_text:
         "Sesi fokus pada psychoeducation tentang kecemasan, breathing exercise, dan sleep hygiene.",
-      diarization_json: JSON.stringify([{ speaker: "patient", text: "Saya sulit tidur" }]),
+      diarization_json: JSON.stringify([
+        { speaker: "patient", text: "Saya sulit tidur" },
+      ]),
       risk_analysis_json: JSON.stringify({ level: "medium", score: 5.5 }),
       mitigation_recommendations:
         "Lanjutkan breathing 4-7-8, batasi kafein, buat jadwal tidur konsisten.",
     },
   });
 
-  // --- Review (untuk cons1) + update rating otomatis (triggered by controller biasanya)
-  const review = await prisma.reviews.create({
+  // --- Review
+  await prisma.reviews.create({
     data: {
       consultation_id: cons1.id,
       patient_id: pat1.id,
@@ -291,12 +314,12 @@ async function main() {
     },
   });
 
-  // hitung ulang rating psy1
   const agg = await prisma.reviews.aggregate({
     where: { psychologist_id: psy1.psy.id },
     _avg: { rating: true },
     _count: { rating: true },
   });
+
   await prisma.psychologists.update({
     where: { id: psy1.psy.id },
     data: { rating_avg: agg._avg.rating ?? 0, rating_count: agg._count.rating },

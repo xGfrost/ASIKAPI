@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
 import { authSchema } from "../validators/auth.schema.js";
-import { signJwt } from "../middleware/auth.js";
 
 // Login-or-register by email only
 export async function auth(req: Request, res: Response) {
@@ -10,27 +9,19 @@ export async function auth(req: Request, res: Response) {
   // Try to find existing user
   const existing = await prisma.users.findUnique({ where: { email } });
   if (existing) {
-    const token = signJwt({
-      id: existing.id,
-      role: existing.role,
-      email: existing.email,
-    });
-    return res.json({ token, user: existing });
+    return res.json({ success: true, user: existing });
   }
 
   const newUser = await prisma.users.create({
     data: {
       email,
+      image:
+        "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
       full_name,
       phone,
       role: "patient",
     },
   });
 
-  const token = signJwt({
-    id: newUser.id,
-    role: newUser.role,
-    email: newUser.email,
-  });
-  return res.status(201).json({ token, user: newUser });
+  return res.status(201).json({ success: true, user: newUser });
 }

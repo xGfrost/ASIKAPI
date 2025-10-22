@@ -3,7 +3,7 @@ import { auth } from "../controllers/auth.controller.js";
 
 const r = Router();
 
-// NOTE: requirement bilang login/logout tidak wajib, tapi biar dev enak tetap sediakan login.
-r.post("/auth", auth);
+// Email-only login-or-register: final path is POST /auth
+r.post("/", auth);
 
 export default r;

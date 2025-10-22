@@ -66,6 +66,7 @@ export interface PsychologistResponse {
   user: {
     id: bigint;
     full_name: string;
+    image: string;
     email: string;
     gender?: string | null;
   };
@@ -131,6 +132,7 @@ export async function listPsychologists(
           select: {
             id: true,
             full_name: true,
+            image: true,
             email: true,
             gender: true,
           },

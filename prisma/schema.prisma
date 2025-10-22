@@ -28,7 +28,7 @@ enum consultation_status {
 }
 
 model users {
-  id            BigInt    @id @default(autoincrement()) @db.BigInt
+  id            String    @id @default(uuid()) @db.Uuid
   role          user_role
   full_name     String    @db.VarChar(150)
   image         String    @db.VarChar(255)
@@ -50,8 +50,7 @@ model users {
 }
 
 model psychologists {
-  id           BigInt    @id @db.BigInt
-  // FK ke users.id 1-1
+  id           String    @id @db.Uuid
   user         users     @relation(fields: [id], references: [id])
   license_no   String?   @db.VarChar(100)
   bio          String?
@@ -73,7 +72,7 @@ model psychologists {
 }
 
 model specialties {
-  id         BigInt   @id @default(autoincrement()) @db.BigInt
+  id         String   @id @default(uuid()) @db.Uuid
   name       String   @unique @db.VarChar(120)
   created_at DateTime @default(now())
 
@@ -83,8 +82,8 @@ model specialties {
 }
 
 model psychologist_specialties {
-  psychologist_id BigInt   @db.BigInt
-  specialty_id    BigInt   @db.BigInt
+  psychologist_id String   @db.Uuid
+  specialty_id    String   @db.Uuid
   created_at      DateTime @default(now())
 
   psychologist psychologists @relation(fields: [psychologist_id], references: [id])
@@ -95,10 +94,10 @@ model psychologist_specialties {
 }
 
 model availabilities {
-  id              BigInt    @id @default(autoincrement()) @db.BigInt
-  psychologist_id BigInt    @db.BigInt
+  id              String    @id @default(uuid()) @db.Uuid
+  psychologist_id String    @db.Uuid
   weekday         Int
-  start_time      DateTime // gunakan DateTime untuk jam (hanya jam-menit dipakai)
+  start_time      DateTime
   end_time        DateTime
   created_at      DateTime  @default(now())
   updated_at      DateTime?
@@ -111,9 +110,9 @@ model availabilities {
 }
 
 model consultations {
-  id                 BigInt               @id @default(autoincrement()) @db.BigInt
-  patient_id         BigInt               @db.BigInt
-  psychologist_id    BigInt               @db.BigInt
+  id                 String               @id @default(uuid()) @db.Uuid
+  patient_id         String               @db.Uuid
+  psychologist_id    String               @db.Uuid
   channel            consultation_channel
   status             consultation_status
   scheduled_start_at DateTime
@@ -139,8 +138,8 @@ model consultations {
 }
 
 model stream_channels {
-  id                BigInt   @id @default(autoincrement()) @db.BigInt
-  consultation_id   BigInt   @unique @db.BigInt
+  id                String   @id @default(uuid()) @db.Uuid
+  consultation_id   String   @unique @db.Uuid
   stream_channel_id String   @unique @db.VarChar(120)
   stream_type       String?  @db.VarChar(20)
   created_at        DateTime @default(now())
@@ -152,8 +151,8 @@ model stream_channels {
 }
 
 model payments {
-  id              BigInt    @id @default(autoincrement()) @db.BigInt
-  consultation_id BigInt    @db.BigInt
+  id              String    @id @default(uuid()) @db.Uuid
+  consultation_id String    @db.Uuid
   amount          Decimal?  @db.Decimal(12, 2)
   method          String?   @db.VarChar(30)
   status          String?   @db.VarChar(20)
@@ -170,10 +169,10 @@ model payments {
 }
 
 model reviews {
-  id              BigInt   @id @default(autoincrement()) @db.BigInt
-  consultation_id BigInt   @unique @db.BigInt
-  patient_id      BigInt   @db.BigInt
-  psychologist_id BigInt   @db.BigInt
+  id              String   @id @default(uuid()) @db.Uuid
+  consultation_id String   @unique @db.Uuid
+  patient_id      String   @db.Uuid
+  psychologist_id String   @db.Uuid
   rating          Int
   comment         String?
   created_at      DateTime @default(now())
@@ -188,10 +187,10 @@ model reviews {
 }
 
 model intake_forms {
-  id              BigInt    @id @default(autoincrement()) @db.BigInt
-  consultation_id BigInt    @unique @db.BigInt
-  patient_id      BigInt    @db.BigInt
-  psychologist_id BigInt    @db.BigInt
+  id              String    @id @default(uuid()) @db.Uuid
+  consultation_id String    @unique @db.Uuid
+  patient_id      String    @db.Uuid
+  psychologist_id String    @db.Uuid
   symptoms_text   String?
   duration_text   String?
   triggers_text   String?
@@ -211,8 +210,8 @@ model intake_forms {
 }
 
 model ai_intake_analysis {
-  id                   BigInt    @id @default(autoincrement()) @db.BigInt
-  intake_form_id       BigInt    @unique @db.BigInt
+  id                   String    @id @default(uuid()) @db.Uuid
+  intake_form_id       String    @unique @db.Uuid
   risk_level           String?   @db.VarChar(20)
   risk_score           Decimal?  @db.Decimal(3, 2)
   risk_flags_json      String?
@@ -226,10 +225,10 @@ model ai_intake_analysis {
 }
 
 model ai_consultation_notes {
-  id                         BigInt    @id @default(autoincrement()) @db.BigInt
-  consultation_id            BigInt    @unique @db.BigInt
-  psychologist_id            BigInt    @db.BigInt
-  patient_id                 BigInt    @db.BigInt
+  id                         String    @id @default(uuid()) @db.Uuid
+  consultation_id            String    @unique @db.Uuid
+  psychologist_id            String    @db.Uuid
+  patient_id                 String    @db.Uuid
   notes_text                 String?
   diarization_json           String?
   risk_analysis_json         String?

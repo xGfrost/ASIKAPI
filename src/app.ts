@@ -1,6 +1,7 @@
 // src/app.ts
 import express from "express";
 import { createRequire } from "node:module";
+import { clerkMiddleware } from "@clerk/express";
 
 // --- CJS packages via require (aman di ESM/NodeNext)
 const require = createRequire(import.meta.url);
@@ -12,7 +13,7 @@ const morgan = require("morgan") as typeof import("morgan");
 import * as helmetModule from "helmet";
 // ambil default jika tersedia, fallback ke modulnya sendiri
 const helmet: (options?: any) => import("express").RequestHandler =
-  ((helmetModule as any).default ?? (helmetModule as any));
+  (helmetModule as any).default ?? (helmetModule as any);
 
 // --- Local imports (pakai .js karena NodeNext)
 import { errorHandler } from "./middleware/error.js";
@@ -37,6 +38,8 @@ export function makeApp() {
   app.use(cors());
   app.use(helmet()); // ✅ sekarang callable di Vercel
   app.use(compression());
+  // Clerk middleware to authenticate incoming requests (req.auth)
+  app.use(clerkMiddleware());
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("dev"));
 
