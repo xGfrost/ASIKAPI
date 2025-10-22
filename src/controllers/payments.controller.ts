@@ -1,30 +1,60 @@
+// src/controllers/payments.controller.ts
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
-import {
-  createPaymentSchema,
-  paymentWebhookSchema,
-} from "../validators/payment.schema.js";
+import { createPaymentSchema, paymentWebhookSchema } from "../validators/payment.schema.js";
+import type { Prisma } from "@prisma/client";
+
+/* =========================
+ *  DTO & Response Types
+ * ========================= */
+
+type ErrorResponse = { error: { message: string; issues?: unknown } };
+
+type PaymentDTO = Prisma.paymentsGetPayload<{
+  select: {
+    id: true;
+    consultation_id: true;
+    amount: true;
+    method: true;
+    status: true;
+    paid_at: true;
+    external_id: true;
+    created_at: true;
+    updated_at: true;
+  };
+}>;
+
+type PaymentWithConsultationDTO = Prisma.paymentsGetPayload<{
+  include: {
+    consultation: true;
+  };
+}>;
+
+type CreatePaymentResponse = { payment: PaymentDTO };
+type ListPaymentsResponse = { items: PaymentDTO[] };
+type GetPaymentResponse = { payment: PaymentWithConsultationDTO };
+type UpdatePaymentResponse = { payment: PaymentDTO };
+type WebhookResponse = { ok: true };
+
+/* =========================
+ *  Controllers
+ * ========================= */
 
 // POST /payments
-export async function createPayment(req: Request, res: Response) {
+export async function createPayment(
+  req: Request,
+  res: Response<CreatePaymentResponse | ErrorResponse>
+) {
   const body = createPaymentSchema.parse(req.body);
 
   // (opsional) Validasi kepemilikan consultation oleh user
   const actor = (req as any).user;
   const c = await prisma.consultations.findUnique({
     where: { id: body.consultation_id },
+    select: { id: true, patient_id: true, psychologist_id: true },
   });
-  if (!c)
-    return res
-      .status(404)
-      .json({ error: { message: "Consultation not found" } });
-  if (
-    !(
-      actor.role === "admin" ||
-      actor.id === c.patient_id ||
-      actor.id === c.psychologist_id
-    )
-  ) {
+  if (!c) return res.status(404).json({ error: { message: "Consultation not found" } });
+  if (!(actor.role === "admin" || actor.id === c.patient_id || actor.id === c.psychologist_id)) {
     return res.status(403).json({ error: { message: "Forbidden" } });
   }
 
@@ -35,20 +65,34 @@ export async function createPayment(req: Request, res: Response) {
       method: body.method,
       status: "pending",
     },
+    select: {
+      id: true,
+      consultation_id: true,
+      amount: true,
+      method: true,
+      status: true,
+      paid_at: true,
+      external_id: true,
+      created_at: true,
+      updated_at: true,
+    },
   });
 
-  res.status(201).json({ payment });
+  return res.status(201).json({ payment });
 }
 
 // GET /payments
-export async function listPayments(req: Request, res: Response) {
+export async function listPayments(
+  req: Request,
+  res: Response<ListPaymentsResponse | ErrorResponse>
+) {
   const actor = (req as any).user;
   const { status, consultation_id } = req.query as {
     status?: string;
     consultation_id?: string;
   };
 
-  const where: any = {};
+  const where: Prisma.paymentsWhereInput = {};
   if (status) where.status = status;
   if (consultation_id) where.consultation_id = String(consultation_id);
 
@@ -62,17 +106,30 @@ export async function listPayments(req: Request, res: Response) {
   const items = await prisma.payments.findMany({
     where,
     orderBy: { created_at: "desc" },
+    select: {
+      id: true,
+      consultation_id: true,
+      amount: true,
+      method: true,
+      status: true,
+      paid_at: true,
+      external_id: true,
+      created_at: true,
+      updated_at: true,
+    },
   });
 
-  res.json({ items });
+  return res.json({ items });
 }
 
 // GET /payments/:id
-export async function getPaymentById(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
+export async function getPaymentById(
+  req: Request,
+  res: Response<GetPaymentResponse | ErrorResponse>
+) {
+  if (!req.params.id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
   const id = String(req.params.id);
   const actor = (req as any).user;
 
@@ -80,8 +137,7 @@ export async function getPaymentById(req: Request, res: Response) {
     where: { id },
     include: { consultation: true },
   });
-  if (!p)
-    return res.status(404).json({ error: { message: "Payment not found" } });
+  if (!p) return res.status(404).json({ error: { message: "Payment not found" } });
 
   if (
     !(
@@ -93,15 +149,17 @@ export async function getPaymentById(req: Request, res: Response) {
     return res.status(403).json({ error: { message: "Forbidden" } });
   }
 
-  res.json({ payment: p });
+  return res.json({ payment: p });
 }
 
 // PUT /payments/:id  (admin)
-export async function updatePaymentStatus(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
+export async function updatePaymentStatus(
+  req: Request,
+  res: Response<UpdatePaymentResponse | ErrorResponse>
+) {
+  if (!req.params.id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
   const id = String(req.params.id);
   const { status, paid_at } = req.body as {
     status: "pending" | "paid" | "failed";
@@ -115,6 +173,17 @@ export async function updatePaymentStatus(req: Request, res: Response) {
       paid_at: paid_at ? new Date(paid_at) : null,
       updated_at: new Date(),
     },
+    select: {
+      id: true,
+      consultation_id: true,
+      amount: true,
+      method: true,
+      status: true,
+      paid_at: true,
+      external_id: true,
+      created_at: true,
+      updated_at: true,
+    },
   });
 
   // Jika paid, pastikan konsultasi minimal scheduled
@@ -125,11 +194,14 @@ export async function updatePaymentStatus(req: Request, res: Response) {
     });
   }
 
-  res.json({ payment: updated });
+  return res.json({ payment: updated });
 }
 
 // POST /payments/webhook
-export async function paymentWebhook(req: Request, res: Response) {
+export async function paymentWebhook(
+  req: Request,
+  res: Response<WebhookResponse | ErrorResponse>
+) {
   const body = paymentWebhookSchema.parse(req.body);
   const paidAt = body.paid_at ? new Date(body.paid_at) : null;
 
@@ -145,5 +217,5 @@ export async function paymentWebhook(req: Request, res: Response) {
     });
   }
 
-  res.json({ ok: true });
+  return res.json({ ok: true });
 }
