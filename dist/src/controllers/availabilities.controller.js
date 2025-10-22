@@ -1,6 +1,8 @@
 import { prisma } from "../config/prisma.js";
 import { z } from "zod";
-// ----- Validators (sesuaikan jika kamu sudah punya schema terpisah) -----
+/* =========================
+ * Validators
+ * ========================= */
 const availabilitySchema = z.object({
     weekday: z.coerce.number().int().min(0).max(6),
     start_time: z.string(), // "09:00" atau ISO string
@@ -11,8 +13,10 @@ const updateAvailabilitySchema = z.object({
     start_time: z.string().optional(),
     end_time: z.string().optional(),
 });
+/* =========================
+ * Helpers
+ * ========================= */
 function parseTimeToDate(input, label) {
-    // dukung "HH:MM"
     const hhmm = /^(\d{1,2}):(\d{2})$/;
     const m = input.match(hhmm);
     if (m) {
@@ -21,10 +25,8 @@ function parseTimeToDate(input, label) {
         if (h < 0 || h > 23 || min < 0 || min > 59) {
             throw new Error(`Invalid ${label}, expected HH:MM`);
         }
-        // gunakan UTC 1970-01-01 agar tanggal diabaikan
         return new Date(Date.UTC(1970, 0, 1, h, min, 0, 0));
     }
-    // fallback: ISO/date string
     const d = new Date(input);
     if (isNaN(d.getTime())) {
         throw new Error(`Invalid ${label}, expected HH:MM or ISO datetime`);
@@ -32,7 +34,6 @@ function parseTimeToDate(input, label) {
     return d;
 }
 function isOverlap(aStart, aEnd, bStart, bEnd) {
-    // overlap jika tidak (aEnd <= bStart || aStart >= bEnd)
     return !(aEnd <= bStart || aStart >= bEnd);
 }
 function actorIsAdminOrOwner(actor, psyId) {
@@ -40,23 +41,23 @@ function actorIsAdminOrOwner(actor, psyId) {
         return false;
     if (actor.role === "admin")
         return true;
-    try {
-        // pastikan tipe sama2 BigInt
-        const actorId = String(actor.id);
-        return actor.role === "psychologist" && actorId === psyId;
-    }
-    catch {
-        return false;
-    }
+    const actorId = String(actor.id);
+    return actor.role === "psychologist" && actorId === psyId;
 }
-// ================== Controllers ==================
+function isDbUnavailable(msg) {
+    return /Can't reach database server|ECONN|ENOTFOUND|timeout/i.test(msg);
+}
+/* =========================
+ * Controllers
+ * ========================= */
 // POST /psychologists/:id/availabilities
 export async function createAvailabilityForPsy(req, res) {
     try {
-        if (!req.params.id)
+        if (!req.params.id) {
             return res
                 .status(400)
                 .json({ error: { message: "Psychologist ID is required" } });
+        }
         const psyId = String(req.params.id);
         const actor = req.user;
         if (!actorIsAdminOrOwner(actor, psyId)) {
@@ -71,10 +72,11 @@ export async function createAvailabilityForPsy(req, res) {
         const { weekday, start_time, end_time } = parsed.data;
         const start = parseTimeToDate(start_time, "start_time");
         const end = parseTimeToDate(end_time, "end_time");
-        if (end <= start)
+        if (end <= start) {
             return res
                 .status(400)
                 .json({ error: { message: "end_time must be after start_time" } });
+        }
         // Cek overlap
         const sameDay = await prisma.availabilities.findMany({
             where: { psychologist_id: psyId, weekday },
@@ -94,11 +96,11 @@ export async function createAvailabilityForPsy(req, res) {
                 end_time: end,
             },
         });
-        res.status(201).json({ availability: av });
+        return res.status(201).json({ availability: av });
     }
     catch (err) {
         const msg = err?.message || "Internal server error";
-        if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
+        if (isDbUnavailable(msg)) {
             return res
                 .status(503)
                 .json({ error: { message: "Database unavailable" } });
@@ -109,16 +111,18 @@ export async function createAvailabilityForPsy(req, res) {
 // PUT /availabilities/:id
 export async function updateAvailability(req, res) {
     try {
-        if (!req.params.id)
+        if (!req.params.id) {
             return res
                 .status(400)
                 .json({ error: { message: "Availability ID is required" } });
+        }
         const id = String(req.params.id);
         const av = await prisma.availabilities.findUnique({ where: { id } });
-        if (!av)
+        if (!av) {
             return res
                 .status(404)
                 .json({ error: { message: "Availability not found" } });
+        }
         const actor = req.user;
         if (!actorIsAdminOrOwner(actor, av.psychologist_id)) {
             return res.status(403).json({ error: { message: "Forbidden" } });
@@ -147,7 +151,7 @@ export async function updateAvailability(req, res) {
                 .status(400)
                 .json({ error: { message: "end_time must be after start_time" } });
         }
-        // cek overlap (exclude dirinya sendiri)
+        // Cek overlap (exclude dirinya sendiri)
         const sameDay = await prisma.availabilities.findMany({
             where: {
                 psychologist_id: av.psychologist_id,
@@ -166,11 +170,11 @@ export async function updateAvailability(req, res) {
             where: { id },
             data: { weekday: nextWeekday, start_time: nextStart, end_time: nextEnd },
         });
-        res.json({ availability: updated });
+        return res.json({ availability: updated });
     }
     catch (err) {
         const msg = err?.message || "Internal server error";
-        if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
+        if (isDbUnavailable(msg)) {
             return res
                 .status(503)
                 .json({ error: { message: "Database unavailable" } });
@@ -181,26 +185,28 @@ export async function updateAvailability(req, res) {
 // DELETE /availabilities/:id
 export async function deleteAvailability(req, res) {
     try {
-        if (!req.params.id)
+        if (!req.params.id) {
             return res
                 .status(400)
                 .json({ error: { message: "Availability ID is required" } });
+        }
         const id = String(req.params.id);
         const av = await prisma.availabilities.findUnique({ where: { id } });
-        if (!av)
+        if (!av) {
             return res
                 .status(404)
                 .json({ error: { message: "Availability not found" } });
+        }
         const actor = req.user;
         if (!actorIsAdminOrOwner(actor, av.psychologist_id)) {
             return res.status(403).json({ error: { message: "Forbidden" } });
         }
         await prisma.availabilities.delete({ where: { id } });
-        res.json({ ok: true });
+        return res.json({ ok: true });
     }
     catch (err) {
         const msg = err?.message || "Internal server error";
-        if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
+        if (isDbUnavailable(msg)) {
             return res
                 .status(503)
                 .json({ error: { message: "Database unavailable" } });
@@ -211,20 +217,21 @@ export async function deleteAvailability(req, res) {
 // GET /psychologists/:id/availabilities (PUBLIC)
 export async function listPsychologistAvailabilities(req, res) {
     try {
-        if (!req.params.id)
+        if (!req.params.id) {
             return res
                 .status(400)
                 .json({ error: { message: "Psychologist ID is required" } });
+        }
         const id = String(req.params.id);
         const items = await prisma.availabilities.findMany({
             where: { psychologist_id: id },
             orderBy: [{ weekday: "asc" }, { start_time: "asc" }],
         });
-        res.json({ items });
+        return res.json({ items });
     }
     catch (err) {
         const msg = err?.message || "Internal server error";
-        if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
+        if (isDbUnavailable(msg)) {
             return res
                 .status(503)
                 .json({ error: { message: "Database unavailable" } });
