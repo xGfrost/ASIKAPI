@@ -1,10 +1,16 @@
 /* eslint-disable no-console */
+// prisma/seed.ts
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
+/** ---------------------------
+ * Utils
+ * --------------------------- */
+const iso = (d) => new Date(d);
+const HOURS = (h) => h * 3600 * 1000;
 async function clearDatabase() {
-    console.log("🧹 Clearing all tables...");
-    // urutan aman dari relasi paling dalam ke paling atas
+    console.log("🧹 Clearing all tables (FK-safe order)...");
+    // Hapus entitas turunan lebih dulu agar tidak kena constraint
     await prisma.ai_consultation_notes.deleteMany({});
     await prisma.ai_intake_analysis.deleteMany({});
     await prisma.intake_forms.deleteMany({});
@@ -20,54 +26,20 @@ async function clearDatabase() {
     console.log("✅ All tables cleared.");
 }
 async function upsertSpecialties(names) {
-    const result = [];
+    const created = [];
     for (const name of names) {
         const s = await prisma.specialties.upsert({
             where: { name },
             update: {},
             create: { name },
         });
-        result.push(s);
+        created.push(s);
     }
-    return result;
-}
-async function createPsychologistUser(opts) {
-    const password = await bcrypt.hash("password123", 10);
-    const user = await prisma.users.create({
-        data: {
-            role: "psychologist",
-            full_name: opts.full_name,
-            email: opts.email,
-            password,
-            gender: "other",
-            image: opts.image ||
-                "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
-        },
-    });
-    const psy = await prisma.psychologists.create({
-        data: {
-            id: user.id,
-            license_no: opts.license_no,
-            bio: opts.bio,
-            price_chat: opts.price_chat,
-            price_video: opts.price_video,
-            rating_avg: 0,
-            rating_count: 0,
-        },
-    });
-    for (const name of opts.specialties) {
-        const spec = await prisma.specialties.findUnique({ where: { name } });
-        if (spec) {
-            await prisma.psychologist_specialties.create({
-                data: { psychologist_id: psy.id, specialty_id: spec.id },
-            });
-        }
-    }
-    return { user, psy };
+    return created;
 }
 async function createPatientUser(full_name, email) {
     const password = await bcrypt.hash("password123", 10);
-    const u = await prisma.users.create({
+    return prisma.users.create({
         data: {
             role: "patient",
             full_name,
@@ -77,13 +49,50 @@ async function createPatientUser(full_name, email) {
             image: "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
         },
     });
-    return u;
+}
+async function createPsychologistUser(opts) {
+    const password = await bcrypt.hash("password123", 10);
+    // 1) Buat user (role psychologist)
+    const user = await prisma.users.create({
+        data: {
+            role: "psychologist",
+            full_name: opts.full_name,
+            email: opts.email,
+            password,
+            gender: "other",
+            image: opts.image ??
+                "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
+        },
+    });
+    // 2) Buat record psychologists dengan id = user.id (1-1)
+    const psy = await prisma.psychologists.create({
+        data: {
+            id: user.id, // penting: sama dengan users.id
+            license_no: opts.license_no,
+            bio: opts.bio,
+            price_chat: opts.price_chat,
+            price_video: opts.price_video,
+            rating_avg: 0,
+            rating_count: 0,
+        },
+    });
+    // 3) Assign specialties berdasarkan nama
+    for (const name of opts.specialties) {
+        const s = await prisma.specialties.findUnique({ where: { name } });
+        if (s) {
+            await prisma.psychologist_specialties.create({
+                data: { psychologist_id: psy.id, specialty_id: s.id },
+            });
+        }
+    }
+    return { user, psy };
 }
 async function main() {
     console.log("🌱 Starting seed...");
-    // --- Bersihkan semua tabel terlebih dahulu
     await clearDatabase();
-    // --- Admin
+    /** ---------------------------
+     * Admin
+     * --------------------------- */
     const admin = await prisma.users.create({
         data: {
             role: "admin",
@@ -94,7 +103,9 @@ async function main() {
             image: "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
         },
     });
-    // --- Specialties
+    /** ---------------------------
+     * Specialties
+     * --------------------------- */
     const specs = await upsertSpecialties([
         "Anxiety",
         "Depression",
@@ -103,11 +114,12 @@ async function main() {
         "Couples",
         "Career",
     ]);
-    console.log(`✅ specialties: ${specs.length}`);
-    // --- Psychologists
+    console.log(`✅ Specialties: ${specs.length}`);
+    /** ---------------------------
+     * Psychologists (3)
+     * --------------------------- */
     const psy1 = await createPsychologistUser({
         full_name: "Dr. Sinta Pramudita, M.Psi, Psikolog",
-        image: "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd?w=800&dpr=2&q=80",
         email: "sinta@asik.local",
         license_no: "PSI-001-2020",
         bio: "Fokus pada kecemasan & depresi. CBT & ACT.",
@@ -133,49 +145,57 @@ async function main() {
         price_video: 230000,
         specialties: ["Child & Adolescent", "Couples"],
     });
-    // --- Availabilities
+    /** ---------------------------
+     * Availabilities
+     * --------------------------- */
     await prisma.availabilities.createMany({
         data: [
+            // psy1: Senin & Rabu 09:00–12:00 UTC
             {
                 psychologist_id: psy1.psy.id,
                 weekday: 1,
-                start_time: new Date("1970-01-01T09:00:00Z"),
-                end_time: new Date("1970-01-01T12:00:00Z"),
+                start_time: iso("1970-01-01T09:00:00Z"),
+                end_time: iso("1970-01-01T12:00:00Z"),
             },
             {
                 psychologist_id: psy1.psy.id,
                 weekday: 3,
-                start_time: new Date("1970-01-01T09:00:00Z"),
-                end_time: new Date("1970-01-01T12:00:00Z"),
+                start_time: iso("1970-01-01T09:00:00Z"),
+                end_time: iso("1970-01-01T12:00:00Z"),
             },
+            // psy2: Selasa 13:00–17:00 UTC
             {
                 psychologist_id: psy2.psy.id,
                 weekday: 2,
-                start_time: new Date("1970-01-01T13:00:00Z"),
-                end_time: new Date("1970-01-01T17:00:00Z"),
+                start_time: iso("1970-01-01T13:00:00Z"),
+                end_time: iso("1970-01-01T17:00:00Z"),
             },
+            // psy3: Kamis 10:00–14:00 UTC
             {
                 psychologist_id: psy3.psy.id,
                 weekday: 4,
-                start_time: new Date("1970-01-01T10:00:00Z"),
-                end_time: new Date("1970-01-01T14:00:00Z"),
+                start_time: iso("1970-01-01T10:00:00Z"),
+                end_time: iso("1970-01-01T14:00:00Z"),
             },
         ],
     });
-    // --- Patients
+    /** ---------------------------
+     * Patients
+     * --------------------------- */
     const pat1 = await createPatientUser("Budi Santoso", "budi@asik.local");
     const pat2 = await createPatientUser("Maya Kartika", "maya@asik.local");
-    // --- Consultations
+    /** ---------------------------
+     * Consultations
+     * --------------------------- */
     const now = new Date();
-    const plusHours = (h) => new Date(now.getTime() + h * 3600 * 1000);
     const cons1 = await prisma.consultations.create({
         data: {
             patient_id: pat1.id,
             psychologist_id: psy1.psy.id,
             channel: "video",
             status: "completed",
-            scheduled_start_at: new Date(now.getTime() - 72 * 3600 * 1000),
-            scheduled_end_at: new Date(now.getTime() - 71 * 3600 * 1000),
+            scheduled_start_at: new Date(now.getTime() - 72 * HOURS(1)),
+            scheduled_end_at: new Date(now.getTime() - 71 * HOURS(1)),
             price: psy1.psy.price_video,
             patient_notes: "Sering cemas saat kerja dan sulit tidur.",
         },
@@ -186,33 +206,37 @@ async function main() {
             psychologist_id: psy2.psy.id,
             channel: "chat",
             status: "scheduled",
-            scheduled_start_at: plusHours(24),
-            scheduled_end_at: plusHours(25),
+            scheduled_start_at: new Date(now.getTime() + 24 * HOURS(1)),
+            scheduled_end_at: new Date(now.getTime() + 25 * HOURS(1)),
             price: psy2.psy.price_chat,
             patient_notes: "Butuh konseling karier & transisi kerja.",
         },
     });
-    // --- Payments
+    /** ---------------------------
+     * Payments
+     * --------------------------- */
     await prisma.payments.createMany({
         data: [
             {
                 consultation_id: cons1.id,
-                amount: psy1.psy.price_video,
+                amount: Number(psy1.psy.price_video ?? 250000),
                 method: "transfer",
                 status: "paid",
-                paid_at: new Date(now.getTime() - 70 * 3600 * 1000),
+                paid_at: new Date(now.getTime() - 70 * HOURS(1)),
                 external_id: "INV-0001",
             },
             {
                 consultation_id: cons2.id,
-                amount: psy2.psy.price_chat,
+                amount: Number(psy2.psy.price_chat ?? 170000),
                 method: "qris",
                 status: "pending",
                 external_id: "INV-0002",
             },
         ],
     });
-    // --- Stream Channel
+    /** ---------------------------
+     * Stream Channel (untuk cons2)
+     * --------------------------- */
     await prisma.stream_channels.create({
         data: {
             consultation_id: cons2.id,
@@ -220,7 +244,9 @@ async function main() {
             stream_type: "chat",
         },
     });
-    // --- Intake Form + AI Analysis
+    /** ---------------------------
+     * Intake Form + AI Intake Analysis (cons1)
+     * --------------------------- */
     const intake1 = await prisma.intake_forms.create({
         data: {
             consultation_id: cons1.id,
@@ -237,14 +263,16 @@ async function main() {
         data: {
             intake_form_id: intake1.id,
             risk_level: "medium",
-            risk_score: 5.5,
+            risk_score: 5.5, // Prisma Decimal akan menerima number
             risk_flags_json: JSON.stringify({
                 keywords: ["cemas", "sulit tidur", "deadline"],
             }),
             recommendations_text: "Pertimbangkan CBT untuk insomnia & teknik relaksasi. Jadwalkan follow-up 1 minggu.",
         },
     });
-    // --- AI Consultation Notes
+    /** ---------------------------
+     * AI Consultation Notes (cons1)
+     * --------------------------- */
     await prisma.ai_consultation_notes.create({
         data: {
             consultation_id: cons1.id,
@@ -258,7 +286,9 @@ async function main() {
             mitigation_recommendations: "Lanjutkan breathing 4-7-8, batasi kafein, buat jadwal tidur konsisten.",
         },
     });
-    // --- Review
+    /** ---------------------------
+     * Review (cons1)
+     * --------------------------- */
     await prisma.reviews.create({
         data: {
             consultation_id: cons1.id,
@@ -268,6 +298,7 @@ async function main() {
             comment: "Psikolog ramah & penjelasannya jelas. Latihan napas membantu.",
         },
     });
+    // Update agregat rating psy1
     const agg = await prisma.reviews.aggregate({
         where: { psychologist_id: psy1.psy.id },
         _avg: { rating: true },
@@ -275,16 +306,25 @@ async function main() {
     });
     await prisma.psychologists.update({
         where: { id: psy1.psy.id },
-        data: { rating_avg: agg._avg.rating ?? 0, rating_count: agg._count.rating },
+        data: {
+            rating_avg: agg._avg.rating ?? 0,
+            rating_count: agg._count.rating,
+        },
     });
-    console.log("✅ Done seeding.");
+    /** ---------------------------
+     * Logs
+     * --------------------------- */
+    console.log("✅ Seed done.");
     console.log("Admin login:");
     console.log("  email: admin@asik.local");
     console.log("  pass : admin123");
     console.log("Psikolog login sample:");
     console.log("  sinta@asik.local / password123");
+    console.log("  harlan@asik.local / password123");
+    console.log("  nadia@asik.local / password123");
     console.log("Pasien login sample:");
     console.log("  budi@asik.local / password123");
+    console.log("  maya@asik.local / password123");
 }
 main()
     .catch((e) => {
