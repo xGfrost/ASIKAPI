@@ -3,11 +3,18 @@ import { listUsersQuerySchema, updateUserSchema, } from "../validators/user.sche
 import { parsePagination, withPagination } from "../utils/pagination.js";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
-// ===== helpers =====
+/** ======================
+ *  Helpers
+ * =======================*/
 const isProd = process.env.NODE_ENV === "production";
-function toSafeUser(u) {
+const toISO = (d) => (d ? d.toISOString() : null);
+// Prisma.Decimal → number (aman untuk uang sederhana)
+const dec = (v) => v == null ? null : Number(v);
+// sembunyikan password dari objek Prisma
+function stripPassword(u) {
     if (!u)
         return u;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...rest } = u;
     return rest;
 }
@@ -42,7 +49,41 @@ function handleError(res, err, fallbackMsg = "Internal server error") {
     }
     return res.status(500).json({ error: { message: fallbackMsg } });
 }
-// ===== controllers =====
+// Map psychologists → DTO
+function toPsychologistDTO(p) {
+    return {
+        id: p.id,
+        license_no: p.license_no ?? null,
+        bio: p.bio ?? null,
+        price_chat: dec(p.price_chat),
+        price_video: dec(p.price_video),
+        rating_avg: dec(p.rating_avg),
+        rating_count: p.rating_count,
+        created_at: p.created_at.toISOString(),
+        updated_at: toISO(p.updated_at),
+    };
+}
+function toUserDTO(u) {
+    if (!u)
+        return null;
+    const safe = stripPassword(u);
+    return {
+        id: safe.id,
+        role: safe.role,
+        full_name: safe.full_name,
+        image: safe.image,
+        email: safe.email,
+        phone: safe.phone ?? null,
+        gender: safe.gender ?? null,
+        date_of_birth: toISO(safe.date_of_birth),
+        created_at: safe.created_at.toISOString(),
+        updated_at: toISO(safe.updated_at),
+        psychologist: safe.psychologist ? toPsychologistDTO(safe.psychologist) : null,
+    };
+}
+/** ======================
+ *  Controllers
+ * =======================*/
 export async function me(req, res) {
     try {
         const u = req.user;
@@ -52,7 +93,7 @@ export async function me(req, res) {
             where: { id: u.id },
             include: { psychologist: true },
         });
-        return res.json({ user: toSafeUser(data) });
+        return res.json({ user: toUserDTO(data) });
     }
     catch (err) {
         return handleError(res, err);
@@ -64,11 +105,23 @@ export async function updateMe(req, res) {
         if (!uid)
             return res.status(401).json({ error: { message: "Unauthorized" } });
         const body = updateUserSchema.parse(req.body);
-        const data = { ...body };
-        if (body.date_of_birth)
-            data.date_of_birth = new Date(body.date_of_birth);
-        const user = await prisma.users.update({ where: { id: uid }, data });
-        return res.json({ user: toSafeUser(user) });
+        const data = {
+            // hanya field2 yang diizinkan oleh schema
+            full_name: body.full_name ?? undefined,
+            image: body.image ?? undefined,
+            phone: body.phone ?? undefined,
+            gender: body.gender ?? undefined,
+            date_of_birth: body.date_of_birth
+                ? new Date(body.date_of_birth)
+                : undefined,
+            updated_at: new Date(),
+        };
+        const user = await prisma.users.update({
+            where: { id: uid },
+            data,
+            include: { psychologist: true },
+        });
+        return res.json({ user: toUserDTO(user) });
     }
     catch (err) {
         return handleError(res, err, "Failed to update profile");
@@ -106,10 +159,16 @@ export async function adminListUsers(req, res) {
         }
         const [total, rows] = await Promise.all([
             prisma.users.count({ where }),
-            prisma.users.findMany({ where, orderBy, skip, take }),
+            prisma.users.findMany({
+                where,
+                orderBy,
+                skip,
+                take,
+                include: { psychologist: true },
+            }),
         ]);
-        const safeRows = rows.map(toSafeUser);
-        return res.json(withPagination(safeRows, total, page, limit));
+        const items = rows.map(toUserDTO);
+        return res.json(withPagination(items, total, page, limit));
     }
     catch (err) {
         return handleError(res, err, "Failed to list users");
@@ -129,7 +188,7 @@ export async function adminGetUser(req, res) {
         });
         if (!user)
             return res.status(404).json({ error: { message: "User not found" } });
-        return res.json({ user: toSafeUser(user) });
+        return res.json({ user: toUserDTO(user) });
     }
     catch (err) {
         return handleError(res, err, "Failed to get user");
@@ -143,14 +202,14 @@ export async function adminDeleteUser(req, res) {
                 .status(400)
                 .json({ error: { message: "User ID is required" } });
         const id = String(idParam);
-        // Ambil semua consultation yang terkait (sebagai patient atau psychologist)
+        // Kumpulkan semua consultations (sebagai patient atau psychologist)
         const cons = await prisma.consultations.findMany({
             where: { OR: [{ patient_id: id }, { psychologist_id: id }] },
             select: { id: true },
         });
         const consIds = cons.map((c) => c.id);
         await prisma.$transaction(async (tx) => {
-            // 1) Hapus entitas yang bergantung pada consultation_id
+            // 1) Hapus entitas bergantung consultation_id
             if (consIds.length > 0) {
                 await tx.stream_channels.deleteMany({
                     where: { consultation_id: { in: consIds } },
@@ -164,20 +223,19 @@ export async function adminDeleteUser(req, res) {
                 await tx.reviews.deleteMany({
                     where: { consultation_id: { in: consIds } },
                 });
-                // Hapus AI intake analysis untuk intake forms dari consultations ini
+                // Hapus AI intake analysis untuk intake_forms dari consultations ini
                 await tx.ai_intake_analysis.deleteMany({
                     where: { intake_form: { is: { consultation_id: { in: consIds } } } },
                 });
-                // Baru hapus intake forms-nya
+                // Baru hapus intake forms yang terkait consultations
                 await tx.intake_forms.deleteMany({
                     where: { consultation_id: { in: consIds } },
                 });
             }
-            // 2) Hapus yang terkait langsung via patient/psychologist (bukan lewat consultation di atas)
+            // 2) Hapus yang terkait langsung via patient/psychologist (bukan lewat consultation)
             await tx.reviews.deleteMany({
                 where: { OR: [{ patient_id: id }, { psychologist_id: id }] },
             });
-            // Catatan: ai_consultation_notes sudah dihapus via consultation_id.
             // Hapus AI intake analysis untuk intake_forms milik user ini
             await tx.ai_intake_analysis.deleteMany({
                 where: {
@@ -199,7 +257,7 @@ export async function adminDeleteUser(req, res) {
             });
             await tx.availabilities.deleteMany({ where: { psychologist_id: id } });
             await tx.psychologists.deleteMany({ where: { id } });
-            // 5) Terakhir: hapus user
+            // 5) Terakhir, hapus user
             await tx.users.delete({ where: { id } });
         });
         return res.json({ ok: true });

@@ -1,29 +1,48 @@
 // Util sederhana untuk pagination konsisten di seluruh controller.
 // - Ambil page/limit dari query (fallback default)
 // - Hitung skip/take (Prisma)
-// - Sediakan helper untuk meta response
+// - Sediakan helper untuk meta response dan versi flat.
 export function parsePagination(q, defaults = { page: 1, limit: 20 }) {
     const page = Math.max(1, Number(q.page ?? defaults.page) || defaults.page);
-    const limit = Math.min(100, Math.max(1, Number(q.limit ?? defaults.limit) || defaults.limit)); // cap 100
+    // batasi limit maksimal 100 agar aman
+    const limit = Math.min(100, Math.max(1, Number(q.limit ?? defaults.limit) || defaults.limit));
     const skip = (page - 1) * limit;
     const take = limit;
     return { page, limit, skip, take };
 }
 export function buildPageInfo(total, page, limit) {
-    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const totalPages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
     return {
         page,
         limit,
         total,
         totalPages,
         hasNext: page < totalPages,
-        hasPrev: page > 1
+        hasPrev: page > 1,
     };
 }
-// Helper umum untuk format respons
+/**
+ * ✅ Versi FLAT (baru) — cocok untuk controller yang mengharapkan
+ * { items, page, limit, total, has_next, has_prev }
+ */
 export function withPagination(items, total, page, limit) {
+    const meta = buildPageInfo(total, page, limit);
     return {
         items,
-        meta: buildPageInfo(total, page, limit)
+        page: meta.page,
+        limit: meta.limit,
+        total: meta.total,
+        has_next: meta.hasNext,
+        has_prev: meta.hasPrev,
+    };
+}
+/**
+ * ✅ Versi META (lama) — tetap disediakan agar tidak breaking
+ * { items, meta: PageInfo }
+ */
+export function withPaginationMeta(items, total, page, limit) {
+    return {
+        items,
+        meta: buildPageInfo(total, page, limit),
     };
 }

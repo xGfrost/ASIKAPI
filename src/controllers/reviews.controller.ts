@@ -1,13 +1,57 @@
+// src/controllers/reviews.controller.ts
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
+import type { Prisma } from "@prisma/client";
 import { createReviewSchema } from "../validators/review.schema.js";
 
+/* =========================
+ *  DTO & Response Types
+ * ========================= */
+
+type ErrorResponse = { error: { message: string; issues?: unknown } };
+
+// Review standar (tanpa include)
+type ReviewDTO = Prisma.reviewsGetPayload<{
+  select: {
+    id: true;
+    consultation_id: true;
+    patient_id: true;
+    psychologist_id: true;
+    rating: true;
+    comment: true;
+    created_at: true;
+  };
+}>;
+
+// Review + patient (untuk list by consultation)
+type ReviewWithPatientDTO = Prisma.reviewsGetPayload<{
+  include: { patient: { select: { id: true; full_name: true } } };
+}>;
+
+// Review + patient + consultation ringkas (untuk list by psychologist)
+type ReviewWithPatientAndConsultDTO = Prisma.reviewsGetPayload<{
+  include: {
+    patient: { select: { id: true; full_name: true } };
+    consultation: { select: { id: true; channel: true; scheduled_start_at: true } };
+  };
+}>;
+
+type CreateReviewResponse = { review: ReviewDTO };
+type ListConsultationReviewsResponse = { items: ReviewWithPatientDTO[] };
+type ListPsychologistReviewsResponse = { items: ReviewWithPatientAndConsultDTO[] };
+
+/* =========================
+ *  Controllers
+ * ========================= */
+
 // POST /consultations/:id/reviews
-export async function createReviewForConsultation(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
+export async function createReviewForConsultation(
+  req: Request,
+  res: Response<CreateReviewResponse | ErrorResponse>
+) {
+  if (!req.params.id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
   const userId: string = (req as any).user.id;
   const cid = String(req.params.id);
 
@@ -21,26 +65,32 @@ export async function createReviewForConsultation(req: Request, res: Response) {
     where: { id: body.consultation_id },
     select: { patient_id: true, psychologist_id: true, status: true },
   });
-  if (!c)
-    return res
-      .status(404)
-      .json({ error: { message: "Consultation not found" } });
+  if (!c) {
+    return res.status(404).json({ error: { message: "Consultation not found" } });
+  }
   if (c.patient_id !== userId && (req as any).user.role !== "admin") {
     return res.status(403).json({ error: { message: "Forbidden" } });
   }
   if (c.status !== "completed") {
-    return res
-      .status(400)
-      .json({ error: { message: "Consultation not completed" } });
+    return res.status(400).json({ error: { message: "Consultation not completed" } });
   }
 
-  const r = await prisma.reviews.create({
+  const review = await prisma.reviews.create({
     data: {
       consultation_id: body.consultation_id,
       patient_id: userId,
       psychologist_id: c.psychologist_id,
       rating: body.rating,
       comment: body.comment,
+    },
+    select: {
+      id: true,
+      consultation_id: true,
+      patient_id: true,
+      psychologist_id: true,
+      rating: true,
+      comment: true,
+      created_at: true,
     },
   });
 
@@ -59,15 +109,17 @@ export async function createReviewForConsultation(req: Request, res: Response) {
     },
   });
 
-  res.status(201).json({ review: r });
+  return res.status(201).json({ review });
 }
 
 // GET /consultations/:id/reviews
-export async function getConsultationReviews(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
+export async function getConsultationReviews(
+  req: Request,
+  res: Response<ListConsultationReviewsResponse | ErrorResponse>
+) {
+  if (!req.params.id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
   const cid = String(req.params.id);
 
   const items = await prisma.reviews.findMany({
@@ -78,16 +130,17 @@ export async function getConsultationReviews(req: Request, res: Response) {
     },
   });
 
-  res.json({ items });
+  return res.json({ items });
 }
 
-// GET /psychologists/:id/reviews  ⬅️ baru
-export async function getPsychologistReviews(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
-
+// GET /psychologists/:id/reviews
+export async function getPsychologistReviews(
+  req: Request,
+  res: Response<ListPsychologistReviewsResponse | ErrorResponse>
+) {
+  if (!req.params.id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
   const pid = String(req.params.id);
 
   const items = await prisma.reviews.findMany({
@@ -95,11 +148,9 @@ export async function getPsychologistReviews(req: Request, res: Response) {
     orderBy: { created_at: "desc" },
     include: {
       patient: { select: { id: true, full_name: true } },
-      consultation: {
-        select: { id: true, channel: true, scheduled_start_at: true },
-      },
+      consultation: { select: { id: true, channel: true, scheduled_start_at: true } },
     },
   });
 
-  res.json({ items });
+  return res.json({ items });
 }
