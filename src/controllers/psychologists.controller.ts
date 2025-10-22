@@ -203,7 +203,7 @@ export async function adminCreatePsychologist(req: Request, res: Response) {
   await prisma.$transaction(async (tx) => {
     if (body.user_id) {
       // Flow A: pakai user_id yang sudah ada
-      uid = toBigInt(body.user_id);
+      uid = String(body.user_id);
       userRecord = await tx.users.findUnique({ where: { id: uid } });
       if (!userRecord) throw new Error("USER_NOT_FOUND");
     } else if (body.user) {

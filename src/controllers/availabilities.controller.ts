@@ -15,13 +15,6 @@ const updateAvailabilitySchema = z.object({
   end_time: z.string().optional(),
 });
 
-// ----- Utils -----
-function toBigInt(v: string | number | bigint) {
-  if (typeof v === "bigint") return v;
-  if (typeof v === "number") return BigInt(v);
-  return BigInt(v);
-}
-
 function parseTimeToDate(input: string, label: string): Date {
   // dukung "HH:MM"
   const hhmm = /^(\d{1,2}):(\d{2})$/;
