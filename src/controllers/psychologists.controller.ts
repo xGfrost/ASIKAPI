@@ -163,25 +163,113 @@ export async function listPsychologists(
 }
 
 // GET /psychologists/:id
-export async function getPsychologistById(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
-  const id = String(req.params.id);
+type SpecialtyDTO = {
+  id: string;
+  name: string;
+};
+
+type UserDTO = {
+  id: string;
+  full_name: string;
+  image: string;
+  email: string;
+  phone: string | null;
+  gender: string | null;
+  date_of_birth: string | null; // ISO
+  created_at: string;           // ISO
+  updated_at: string | null;    // ISO
+};
+
+type PsychologistDTO = {
+  id: string;
+  license_no: string | null;
+  bio: string | null;
+  price_chat: number | null;
+  price_video: number | null;
+  rating_avg: number | null;
+  rating_count: number;
+  specialties: SpecialtyDTO[];
+  user: UserDTO;
+  created_at: string;         // ISO
+  updated_at: string | null;  // ISO
+};
+
+type GetPsychologistResponse = {
+  psychologist: PsychologistDTO;
+};
+
+/** =========================
+ *  Helpers (mappers)
+ *  ========================= */
+const dec = (v: Prisma.Decimal | null | undefined): number | null =>
+  v == null ? null : Number(v);
+
+const iso = (d: Date | null | undefined): string | null =>
+  d ? d.toISOString() : null;
+
+// Prisma return type with relations we include below
+type PsyWithRels = Prisma.psychologistsGetPayload<{
+  include: {
+    user: true;
+    specialties: { include: { specialty: true } };
+  };
+}>;
+
+function toDTO(p: PsyWithRels): PsychologistDTO {
+  return {
+    id: p.id,
+    license_no: p.license_no ?? null,
+    bio: p.bio ?? null,
+    price_chat: dec(p.price_chat),
+    price_video: dec(p.price_video),
+    rating_avg: dec(p.rating_avg),
+    rating_count: p.rating_count,
+    specialties: p.specialties.map(({ specialty }) => ({
+      id: specialty.id,
+      name: specialty.name,
+    })),
+    user: {
+      id: p.user.id,
+      full_name: p.user.full_name,
+      image: p.user.image,
+      email: p.user.email,
+      phone: p.user.phone ?? null,
+      gender: p.user.gender ?? null,
+      date_of_birth: iso(p.user.date_of_birth),
+      created_at: p.user.created_at.toISOString(),
+      updated_at: iso(p.user.updated_at),
+    },
+    created_at: p.created_at.toISOString(),
+    updated_at: iso(p.updated_at),
+  };
+}
+
+/** =========================
+ *  Handler
+ *  ========================= */
+export async function getPsychologistById(
+  req: Request,
+  res: Response<GetPsychologistResponse | { error: { message: string } }>
+) {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
 
   const doc = await prisma.psychologists.findUnique({
     where: { id },
     include: {
-      user: true,
+      user: true, // password tidak ikut karena tidak dipilih eksplisit
       specialties: { include: { specialty: true } },
     },
   });
-  if (!doc)
-    return res
-      .status(404)
-      .json({ error: { message: "Psychologist not found" } });
-  res.json({ psychologist: doc });
+
+  if (!doc) {
+    return res.status(404).json({ error: { message: "Psychologist not found" } });
+  }
+
+  const payload: GetPsychologistResponse = { psychologist: toDTO(doc) };
+  return res.json(payload);
 }
 
 // POST /psychologists (ADMIN)
@@ -353,38 +441,133 @@ export async function updatePsychologistById(req: Request, res: Response) {
 }
 
 // GET /psychologists/:id/reviews
-export async function listPsychologistReviews(req: Request, res: Response) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
-  const id = String(req.params.id);
-  const items = await prisma.reviews.findMany({
-    where: { psychologist_id: id },
+type MinimalPatientDTO = {
+  id: string;
+  full_name: string;
+};
+
+type MinimalConsultationDTO = {
+  id: string;
+  channel: "chat" | "video";
+  scheduled_start_at: string; // ISO
+};
+
+export type ReviewItemDTO = {
+  id: string;
+  psychologist_id: string;
+  consultation_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string; // ISO
+  patient: MinimalPatientDTO;
+  consultation: MinimalConsultationDTO;
+};
+
+export type ListPsychologistReviewsResponse = {
+  items: ReviewItemDTO[];
+};
+
+/** ========= Prisma Payload Type ========= */
+type ReviewWithRels = Prisma.reviewsGetPayload<{
+  include: {
+    patient: { select: { id: true; full_name: true } };
+    consultation: { select: { id: true; channel: true; scheduled_start_at: true } };
+  };
+}>;
+
+/** ========= Mapper ========= */
+function toReviewDTO(r: ReviewWithRels): ReviewItemDTO {
+  return {
+    id: r.id,
+    psychologist_id: r.psychologist_id,
+    consultation_id: r.consultation_id,
+    rating: r.rating,
+    comment: r.comment ?? null,
+    created_at: r.created_at.toISOString(),
+    patient: {
+      id: r.patient.id,
+      full_name: r.patient.full_name,
+    },
+    consultation: {
+      id: r.consultation.id,
+      channel: r.consultation.channel, // sudah narrow ke "chat" | "video" dari enum
+      scheduled_start_at: r.consultation.scheduled_start_at.toISOString(),
+    },
+  };
+}
+
+/** ========= Handler ========= */
+export async function listPsychologistReviews(
+  req: Request,
+  res: Response<ListPsychologistReviewsResponse | { error: { message: string } }>
+) {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
+
+  const rows = await prisma.reviews.findMany({
+    where: { psychologist_id: String(id) },
     orderBy: { created_at: "desc" },
     include: {
       patient: { select: { id: true, full_name: true } },
-      consultation: {
-        select: { id: true, channel: true, scheduled_start_at: true },
-      },
+      consultation: { select: { id: true, channel: true, scheduled_start_at: true } },
     },
   });
-  res.json({ items });
+
+  const items = rows.map(toReviewDTO);
+  return res.json({ items });
 }
 
 // GET /psychologists/:id/availabilities
+/** ========= DTO ========= */
+export type AvailabilityDTO = {
+  id: string;
+  psychologist_id: string;
+  weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=minggu .. 6=sabtu
+  start_time: string;   // ISO
+  end_time: string;     // ISO
+  created_at: string;   // ISO
+  updated_at: string | null; // ISO
+};
+
+export type ListPsychologistAvailabilitiesResponse = {
+  items: AvailabilityDTO[];
+};
+
+/** ========= Prisma payload type ========= */
+type AvailabilityRow = Prisma.availabilitiesGetPayload<{}>;
+
+/** ========= Helper mapper ========= */
+const toISO = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+function toAvailabilityDTO(a: AvailabilityRow): AvailabilityDTO {
+  return {
+    id: a.id,
+    psychologist_id: a.psychologist_id,
+    weekday: a.weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+    start_time: a.start_time.toISOString(),
+    end_time: a.end_time.toISOString(),
+    created_at: a.created_at.toISOString(),
+    updated_at: toISO(a.updated_at),
+  };
+}
+
+/** ========= Handler ========= */
 export async function listPsychologistAvailabilities(
   req: Request,
-  res: Response
+  res: Response<ListPsychologistAvailabilitiesResponse | { error: { message: string } }>
 ) {
-  if (!req.params.id)
-    return res
-      .status(400)
-      .json({ error: { message: "Psychologist ID is required" } });
-  const id = String(req.params.id);
-  const items = await prisma.availabilities.findMany({
-    where: { psychologist_id: id },
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+  }
+
+  const rows = await prisma.availabilities.findMany({
+    where: { psychologist_id: String(id) },
     orderBy: [{ weekday: "asc" }, { start_time: "asc" }],
   });
-  res.json({ items });
+
+  const items = rows.map(toAvailabilityDTO);
+  return res.json({ items });
 }
