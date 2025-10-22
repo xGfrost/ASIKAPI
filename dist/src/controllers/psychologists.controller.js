@@ -110,25 +110,59 @@ export async function listPsychologists(req, res) {
         res.status(500).json({ items: [] });
     }
 }
-// GET /psychologists/:id
+/** =========================
+ *  Helpers (mappers)
+ *  ========================= */
+const dec = (v) => v == null ? null : Number(v);
+const iso = (d) => d ? d.toISOString() : null;
+function toDTO(p) {
+    return {
+        id: p.id,
+        license_no: p.license_no ?? null,
+        bio: p.bio ?? null,
+        price_chat: dec(p.price_chat),
+        price_video: dec(p.price_video),
+        rating_avg: dec(p.rating_avg),
+        rating_count: p.rating_count,
+        specialties: p.specialties.map(({ specialty }) => ({
+            id: specialty.id,
+            name: specialty.name,
+        })),
+        user: {
+            id: p.user.id,
+            full_name: p.user.full_name,
+            image: p.user.image,
+            email: p.user.email,
+            phone: p.user.phone ?? null,
+            gender: p.user.gender ?? null,
+            date_of_birth: iso(p.user.date_of_birth),
+            created_at: p.user.created_at.toISOString(),
+            updated_at: iso(p.user.updated_at),
+        },
+        created_at: p.created_at.toISOString(),
+        updated_at: iso(p.updated_at),
+    };
+}
+/** =========================
+ *  Handler
+ *  ========================= */
 export async function getPsychologistById(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
-    const id = String(req.params.id);
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const doc = await prisma.psychologists.findUnique({
         where: { id },
         include: {
-            user: true,
+            user: true, // password tidak ikut karena tidak dipilih eksplisit
             specialties: { include: { specialty: true } },
         },
     });
-    if (!doc)
-        return res
-            .status(404)
-            .json({ error: { message: "Psychologist not found" } });
-    res.json({ psychologist: doc });
+    if (!doc) {
+        return res.status(404).json({ error: { message: "Psychologist not found" } });
+    }
+    const payload = { psychologist: toDTO(doc) };
+    return res.json(payload);
 }
 // POST /psychologists (ADMIN)
 export async function adminCreatePsychologist(req, res) {
@@ -145,7 +179,7 @@ export async function adminCreatePsychologist(req, res) {
     await prisma.$transaction(async (tx) => {
         if (body.user_id) {
             // Flow A: pakai user_id yang sudah ada
-            uid = toBigInt(body.user_id);
+            uid = String(body.user_id);
             userRecord = await tx.users.findUnique({ where: { id: uid } });
             if (!userRecord)
                 throw new Error("USER_NOT_FOUND");
@@ -283,35 +317,66 @@ export async function updatePsychologistById(req, res) {
     });
     return res.json({ psychologist: doc });
 }
-// GET /psychologists/:id/reviews
+/** ========= Mapper ========= */
+function toReviewDTO(r) {
+    return {
+        id: r.id,
+        psychologist_id: r.psychologist_id,
+        consultation_id: r.consultation_id,
+        rating: r.rating,
+        comment: r.comment ?? null,
+        created_at: r.created_at.toISOString(),
+        patient: {
+            id: r.patient.id,
+            full_name: r.patient.full_name,
+        },
+        consultation: {
+            id: r.consultation.id,
+            channel: r.consultation.channel, // sudah narrow ke "chat" | "video" dari enum
+            scheduled_start_at: r.consultation.scheduled_start_at.toISOString(),
+        },
+    };
+}
+/** ========= Handler ========= */
 export async function listPsychologistReviews(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
-    const id = String(req.params.id);
-    const items = await prisma.reviews.findMany({
-        where: { psychologist_id: id },
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
+    const rows = await prisma.reviews.findMany({
+        where: { psychologist_id: String(id) },
         orderBy: { created_at: "desc" },
         include: {
             patient: { select: { id: true, full_name: true } },
-            consultation: {
-                select: { id: true, channel: true, scheduled_start_at: true },
-            },
+            consultation: { select: { id: true, channel: true, scheduled_start_at: true } },
         },
     });
-    res.json({ items });
+    const items = rows.map(toReviewDTO);
+    return res.json({ items });
 }
-// GET /psychologists/:id/availabilities
+/** ========= Helper mapper ========= */
+const toISO = (d) => (d ? d.toISOString() : null);
+function toAvailabilityDTO(a) {
+    return {
+        id: a.id,
+        psychologist_id: a.psychologist_id,
+        weekday: a.weekday,
+        start_time: a.start_time.toISOString(),
+        end_time: a.end_time.toISOString(),
+        created_at: a.created_at.toISOString(),
+        updated_at: toISO(a.updated_at),
+    };
+}
+/** ========= Handler ========= */
 export async function listPsychologistAvailabilities(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
-    const id = String(req.params.id);
-    const items = await prisma.availabilities.findMany({
-        where: { psychologist_id: id },
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
+    const rows = await prisma.availabilities.findMany({
+        where: { psychologist_id: String(id) },
         orderBy: [{ weekday: "asc" }, { start_time: "asc" }],
     });
-    res.json({ items });
+    const items = rows.map(toAvailabilityDTO);
+    return res.json({ items });
 }
