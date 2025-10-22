@@ -1,7 +1,10 @@
 // src/controllers/users.controller.ts
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
-import { listUsersQuerySchema, updateUserSchema } from "../validators/user.schema.js";
+import {
+  listUsersQuerySchema,
+  updateUserSchema,
+} from "../validators/user.schema.js";
 import { parsePagination, withPagination } from "../utils/pagination.js";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
@@ -26,18 +29,31 @@ function isDbConnError(err: unknown) {
   );
 }
 
-function handleError(res: Response, err: unknown, fallbackMsg = "Internal server error") {
+function handleError(
+  res: Response,
+  err: unknown,
+  fallbackMsg = "Internal server error"
+) {
   if (!isProd) console.error(err);
   if (err instanceof ZodError) {
-    return res.status(422).json({ error: { message: "Validation failed", issues: err.issues } });
+    return res
+      .status(422)
+      .json({ error: { message: "Validation failed", issues: err.issues } });
   }
   if (isDbConnError(err)) {
     return res.status(503).json({ error: { message: "Database unavailable" } });
   }
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    if (err.code === "P2002") return res.status(409).json({ error: { message: "Conflict: unique constraint" } });
-    if (err.code === "P2025") return res.status(404).json({ error: { message: "Record not found" } });
-    if (err.code === "P2003") return res.status(409).json({ error: { message: "Constraint violation" } });
+    if (err.code === "P2002")
+      return res
+        .status(409)
+        .json({ error: { message: "Conflict: unique constraint" } });
+    if (err.code === "P2025")
+      return res.status(404).json({ error: { message: "Record not found" } });
+    if (err.code === "P2003")
+      return res
+        .status(409)
+        .json({ error: { message: "Constraint violation" } });
   }
   return res.status(500).json({ error: { message: fallbackMsg } });
 }
@@ -47,7 +63,8 @@ function handleError(res: Response, err: unknown, fallbackMsg = "Internal server
 export async function me(req: Request, res: Response) {
   try {
     const u = (req as any).user;
-    if (!u?.id) return res.status(401).json({ error: { message: "Unauthorized" } });
+    if (!u?.id)
+      return res.status(401).json({ error: { message: "Unauthorized" } });
 
     const data = await prisma.users.findUnique({
       where: { id: u.id },
@@ -62,8 +79,9 @@ export async function me(req: Request, res: Response) {
 
 export async function updateMe(req: Request, res: Response) {
   try {
-    const uid: bigint = (req as any).user?.id;
-    if (!uid) return res.status(401).json({ error: { message: "Unauthorized" } });
+    const uid: string = (req as any).user?.id;
+    if (!uid)
+      return res.status(401).json({ error: { message: "Unauthorized" } });
 
     const body = updateUserSchema.parse(req.body);
     const data: any = { ...body };
@@ -123,14 +141,18 @@ export async function adminListUsers(req: Request, res: Response) {
 export async function adminGetUser(req: Request, res: Response) {
   try {
     const idParam = req.params.id;
-    if (!idParam) return res.status(400).json({ error: { message: "User ID is required" } });
-    const id = BigInt(idParam);
+    if (!idParam)
+      return res
+        .status(400)
+        .json({ error: { message: "User ID is required" } });
+    const id = String(idParam);
 
     const user = await prisma.users.findUnique({
       where: { id },
       include: { psychologist: true },
     });
-    if (!user) return res.status(404).json({ error: { message: "User not found" } });
+    if (!user)
+      return res.status(404).json({ error: { message: "User not found" } });
 
     return res.json({ user: toSafeUser(user) });
   } catch (err) {
@@ -141,8 +163,11 @@ export async function adminGetUser(req: Request, res: Response) {
 export async function adminDeleteUser(req: Request, res: Response) {
   try {
     const idParam = req.params.id;
-    if (!idParam) return res.status(400).json({ error: { message: "User ID is required" } });
-    const id = BigInt(idParam);
+    if (!idParam)
+      return res
+        .status(400)
+        .json({ error: { message: "User ID is required" } });
+    const id = String(idParam);
 
     // Ambil semua consultation yang terkait (sebagai patient atau psychologist)
     const cons = await prisma.consultations.findMany({
@@ -154,17 +179,27 @@ export async function adminDeleteUser(req: Request, res: Response) {
     await prisma.$transaction(async (tx) => {
       // 1) Hapus entitas yang bergantung pada consultation_id
       if (consIds.length > 0) {
-        await tx.stream_channels.deleteMany({ where: { consultation_id: { in: consIds } } });
-        await tx.payments.deleteMany({ where: { consultation_id: { in: consIds } } });
-        await tx.ai_consultation_notes.deleteMany({ where: { consultation_id: { in: consIds } } });
-        await tx.reviews.deleteMany({ where: { consultation_id: { in: consIds } } });
+        await tx.stream_channels.deleteMany({
+          where: { consultation_id: { in: consIds } },
+        });
+        await tx.payments.deleteMany({
+          where: { consultation_id: { in: consIds } },
+        });
+        await tx.ai_consultation_notes.deleteMany({
+          where: { consultation_id: { in: consIds } },
+        });
+        await tx.reviews.deleteMany({
+          where: { consultation_id: { in: consIds } },
+        });
 
         // Hapus AI intake analysis untuk intake forms dari consultations ini
         await tx.ai_intake_analysis.deleteMany({
           where: { intake_form: { is: { consultation_id: { in: consIds } } } },
         });
         // Baru hapus intake forms-nya
-        await tx.intake_forms.deleteMany({ where: { consultation_id: { in: consIds } } });
+        await tx.intake_forms.deleteMany({
+          where: { consultation_id: { in: consIds } },
+        });
       }
 
       // 2) Hapus yang terkait langsung via patient/psychologist (bukan lewat consultation di atas)
@@ -175,7 +210,11 @@ export async function adminDeleteUser(req: Request, res: Response) {
       // Catatan: ai_consultation_notes sudah dihapus via consultation_id.
       // Hapus AI intake analysis untuk intake_forms milik user ini
       await tx.ai_intake_analysis.deleteMany({
-        where: { intake_form: { is: { OR: [{ patient_id: id }, { psychologist_id: id }] } } },
+        where: {
+          intake_form: {
+            is: { OR: [{ patient_id: id }, { psychologist_id: id }] },
+          },
+        },
       });
       await tx.intake_forms.deleteMany({
         where: { OR: [{ patient_id: id }, { psychologist_id: id }] },
@@ -187,7 +226,9 @@ export async function adminDeleteUser(req: Request, res: Response) {
       });
 
       // 4) Jika user adalah psikolog, bersihkan resource psikolog
-      await tx.psychologist_specialties.deleteMany({ where: { psychologist_id: id } });
+      await tx.psychologist_specialties.deleteMany({
+        where: { psychologist_id: id },
+      });
       await tx.availabilities.deleteMany({ where: { psychologist_id: id } });
       await tx.psychologists.deleteMany({ where: { id } });
 

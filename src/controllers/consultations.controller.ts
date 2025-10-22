@@ -3,15 +3,6 @@ import { prisma } from "../config/prisma.js";
 import { createConsultationSchema } from "../validators/consultation.schema.js";
 import { z } from "zod";
 
-// ---------------- Utils ----------------
-function toBigInt(v: any): bigint {
-  if (typeof v === "bigint") return v;
-  if (typeof v === "number") return BigInt(v);
-  if (typeof v === "string" && v.length > 0) return BigInt(v);
-  // fallback aman (akan meledak kalau tak valid)
-  return BigInt(v);
-}
-
 function overlaps(startA: Date, endA: Date, startB: Date, endB: Date) {
   return startA < endB && startB < endA;
 }
@@ -27,11 +18,11 @@ const StatusEnum = z.enum([
 
 function canSeeConsultation(
   actor: any,
-  c: { patient_id: bigint; psychologist_id: bigint }
+  c: { patient_id: string; psychologist_id: string }
 ) {
   if (!actor) return false;
   if (actor.role === "admin") return true;
-  const actorId = toBigInt(actor.id);
+  const actorId = String(actor.id);
   return actorId === c.patient_id || actorId === c.psychologist_id;
 }
 
@@ -45,26 +36,31 @@ export async function createConsultation(req: Request, res: Response) {
     // Admin boleh membuatkan utk pasien lain via body.patient_id
     const patientId =
       actor.role === "admin" && req.body?.patient_id != null
-        ? toBigInt(req.body.patient_id)
-        : toBigInt(actor.id);
+        ? String(req.body.patient_id)
+        : String(actor.id);
 
     // validasi & coerce ID psy di schema kamu (schema boleh terima string/number)
     const parsed = createConsultationSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(422)
-        .json({ error: { message: "Validation failed", issues: parsed.error.issues } });
+      return res.status(422).json({
+        error: { message: "Validation failed", issues: parsed.error.issues },
+      });
     }
     const body = parsed.data;
 
-    const psyId = toBigInt(body.psychologist_id);
+    const psyId = String(body.psychologist_id);
     const psy = await prisma.psychologists.findUnique({ where: { id: psyId } });
-    if (!psy) return res.status(404).json({ error: { message: "Psychologist not found" } });
+    if (!psy)
+      return res
+        .status(404)
+        .json({ error: { message: "Psychologist not found" } });
 
     const start = new Date(body.scheduled_start_at);
     const end = new Date(body.scheduled_end_at);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
-      return res.status(400).json({ error: { message: "Invalid schedule range" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Invalid schedule range" } });
     }
 
     // cek bentrok konsultasi psikolog (scheduled/ongoing)
@@ -109,7 +105,7 @@ export async function createConsultation(req: Request, res: Response) {
 export async function listMyConsultations(req: Request, res: Response) {
   try {
     const u = (req as any).user;
-    const uid = toBigInt(u.id);
+    const uid = String(u.id);
 
     const where =
       u.role === "psychologist"
@@ -142,9 +138,11 @@ export async function listMyConsultations(req: Request, res: Response) {
 export async function getConsultationById(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Consultation ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Consultation ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
     const c = await prisma.consultations.findUnique({
       where: { id },
       include: {
@@ -155,7 +153,10 @@ export async function getConsultationById(req: Request, res: Response) {
         stream_channel: true,
       },
     });
-    if (!c) return res.status(404).json({ error: { message: "Consultation not found" } });
+    if (!c)
+      return res
+        .status(404)
+        .json({ error: { message: "Consultation not found" } });
 
     const actor = (req as any).user;
     if (!canSeeConsultation(actor, c)) {
@@ -175,15 +176,20 @@ export async function getConsultationById(req: Request, res: Response) {
 export async function updateConsultation(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Consultation ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Consultation ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
     const actor = (req as any).user;
 
     const current = await prisma.consultations.findUnique({ where: { id } });
-    if (!current) return res.status(404).json({ error: { message: "Consultation not found" } });
+    if (!current)
+      return res
+        .status(404)
+        .json({ error: { message: "Consultation not found" } });
 
-    const actorId = toBigInt(actor.id);
+    const actorId = String(actor.id);
     if (
       actor.role !== "admin" &&
       !(actor.role === "psychologist" && actorId === current.psychologist_id)
@@ -198,9 +204,9 @@ export async function updateConsultation(req: Request, res: Response) {
     if (statusVal !== undefined) {
       const parsed = StatusEnum.safeParse(statusVal);
       if (!parsed.success) {
-        return res
-          .status(422)
-          .json({ error: { message: "Invalid status", issues: parsed.error.issues } });
+        return res.status(422).json({
+          error: { message: "Invalid status", issues: parsed.error.issues },
+        });
       }
       data.status = parsed.data;
     }
@@ -215,7 +221,9 @@ export async function updateConsultation(req: Request, res: Response) {
       const start = new Date(scheduled_start_at ?? current.scheduled_start_at);
       const end = new Date(scheduled_end_at ?? current.scheduled_end_at);
       if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
-        return res.status(400).json({ error: { message: "Invalid schedule range" } });
+        return res
+          .status(400)
+          .json({ error: { message: "Invalid schedule range" } });
       }
 
       // cek bentrok (exclude current id)
@@ -231,7 +239,9 @@ export async function updateConsultation(req: Request, res: Response) {
         overlaps(start, end, c.scheduled_start_at, c.scheduled_end_at)
       );
       if (isClash) {
-        return res.status(409).json({ error: { message: "Schedule conflict" } });
+        return res
+          .status(409)
+          .json({ error: { message: "Schedule conflict" } });
       }
 
       data.scheduled_start_at = start;
@@ -247,20 +257,24 @@ export async function updateConsultation(req: Request, res: Response) {
   }
 }
 
-
 // DELETE /consultations/:id  -> admin atau patient pemilik
 export async function cancelConsultation(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Consultation ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Consultation ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
     const actor = (req as any).user;
 
     const c = await prisma.consultations.findUnique({ where: { id } });
-    if (!c) return res.status(404).json({ error: { message: "Consultation not found" } });
+    if (!c)
+      return res
+        .status(404)
+        .json({ error: { message: "Consultation not found" } });
 
-    const actorId = toBigInt(actor.id);
+    const actorId = String(actor.id);
     if (!(actor.role === "admin" || actorId === c.patient_id)) {
       return res.status(403).json({ error: { message: "Forbidden" } });
     }

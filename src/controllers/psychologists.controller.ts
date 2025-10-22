@@ -7,10 +7,10 @@ import { z } from "zod";
 import { hash } from "../utils/hash.js";
 
 // ========== Helpers ==========
-function toBigInt(v: string | number | bigint) {
-  if (typeof v === "bigint") return v;
-  if (typeof v === "number") return BigInt(v);
-  return BigInt(v);
+function toBigInt(v: string | number | string) {
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return String(v);
 }
 
 // Schema khusus endpoint ADMIN create (boleh user_id ATAU user)
@@ -20,6 +20,7 @@ const adminCreatePsychologistSchema = z
     user: z
       .object({
         full_name: z.string().min(1),
+        image: z.string().min(1),
         email: z.string().email(),
         password: z.string().min(6).optional(),
         phone: z.string().optional(),
@@ -54,7 +55,7 @@ export interface ListPsychologistsQuery {
 
 // GET /psychologists
 export interface PsychologistResponse {
-  id: bigint;
+  id: string;
   license_no?: string | null;
   bio?: string | null;
   price_chat?: string | null;
@@ -64,7 +65,7 @@ export interface PsychologistResponse {
   created_at: Date;
   updated_at?: Date | null;
   user: {
-    id: bigint;
+    id: string;
     full_name: string;
     image: string;
     email: string;
@@ -72,7 +73,7 @@ export interface PsychologistResponse {
   };
   specialties: {
     specialty: {
-      id: bigint;
+      id: string;
       name: string;
     };
   }[];
@@ -96,7 +97,7 @@ export async function listPsychologists(
     }
 
     if (specialty_id) {
-      const specialtyIdNum = BigInt(specialty_id);
+      const specialtyIdNum = String(specialty_id);
       where.specialties = {
         some: { specialty_id: specialtyIdNum },
       };
@@ -167,7 +168,7 @@ export async function getPsychologistById(req: Request, res: Response) {
     return res
       .status(400)
       .json({ error: { message: "Psychologist ID is required" } });
-  const id = BigInt(req.params.id);
+  const id = String(req.params.id);
 
   const doc = await prisma.psychologists.findUnique({
     where: { id },
@@ -194,7 +195,7 @@ export async function adminCreatePsychologist(req: Request, res: Response) {
   const body = parsed.data;
 
   // Dapatkan/buat user
-  let uid: bigint;
+  let uid: string;
   let userRecord: Prisma.PromiseReturnType<
     typeof prisma.users.findUnique
   > | null = null;
@@ -221,6 +222,7 @@ export async function adminCreatePsychologist(req: Request, res: Response) {
           data: {
             role: "psychologist",
             full_name: body.user.full_name,
+            image: body.user.image,
             email: body.user.email,
             password: passwordHash,
             phone: body.user.phone,
@@ -296,7 +298,7 @@ export async function updatePsychologistById(req: Request, res: Response) {
       .status(400)
       .json({ error: { message: "Psychologist ID is required" } });
   }
-  const id = BigInt(req.params.id);
+  const id = String(req.params.id);
   const actor = (req as any).user;
 
   if (
@@ -356,7 +358,7 @@ export async function listPsychologistReviews(req: Request, res: Response) {
     return res
       .status(400)
       .json({ error: { message: "Psychologist ID is required" } });
-  const id = BigInt(req.params.id);
+  const id = String(req.params.id);
   const items = await prisma.reviews.findMany({
     where: { psychologist_id: id },
     orderBy: { created_at: "desc" },
@@ -379,7 +381,7 @@ export async function listPsychologistAvailabilities(
     return res
       .status(400)
       .json({ error: { message: "Psychologist ID is required" } });
-  const id = BigInt(req.params.id);
+  const id = String(req.params.id);
   const items = await prisma.availabilities.findMany({
     where: { psychologist_id: id },
     orderBy: [{ weekday: "asc" }, { start_time: "asc" }],

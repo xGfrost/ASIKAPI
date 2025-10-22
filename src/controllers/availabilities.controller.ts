@@ -48,12 +48,12 @@ function isOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return !(aEnd <= bStart || aStart >= bEnd);
 }
 
-function actorIsAdminOrOwner(actor: any, psyId: bigint) {
+function actorIsAdminOrOwner(actor: any, psyId: string) {
   if (!actor) return false;
   if (actor.role === "admin") return true;
   try {
     // pastikan tipe sama2 BigInt
-    const actorId = toBigInt(actor.id);
+    const actorId = String(actor.id);
     return actor.role === "psychologist" && actorId === psyId;
   } catch {
     return false;
@@ -66,9 +66,11 @@ function actorIsAdminOrOwner(actor: any, psyId: bigint) {
 export async function createAvailabilityForPsy(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Psychologist ID is required" } });
 
-    const psyId = toBigInt(req.params.id);
+    const psyId = String(req.params.id);
     const actor = (req as any).user;
     if (!actorIsAdminOrOwner(actor, psyId)) {
       return res.status(403).json({ error: { message: "Forbidden" } });
@@ -76,36 +78,49 @@ export async function createAvailabilityForPsy(req: Request, res: Response) {
 
     const parsed = availabilitySchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(422)
-        .json({ error: { message: "Validation failed", issues: parsed.error.issues } });
+      return res.status(422).json({
+        error: { message: "Validation failed", issues: parsed.error.issues },
+      });
     }
     const { weekday, start_time, end_time } = parsed.data;
 
     const start = parseTimeToDate(start_time, "start_time");
     const end = parseTimeToDate(end_time, "end_time");
     if (end <= start)
-      return res.status(400).json({ error: { message: "end_time must be after start_time" } });
+      return res
+        .status(400)
+        .json({ error: { message: "end_time must be after start_time" } });
 
     // Cek overlap
     const sameDay = await prisma.availabilities.findMany({
       where: { psychologist_id: psyId, weekday },
       select: { id: true, start_time: true, end_time: true },
     });
-    const hasOverlap = sameDay.some((a) => isOverlap(start, end, a.start_time, a.end_time));
+    const hasOverlap = sameDay.some((a) =>
+      isOverlap(start, end, a.start_time, a.end_time)
+    );
     if (hasOverlap) {
-      return res.status(409).json({ error: { message: "Availability overlaps with existing slot" } });
+      return res.status(409).json({
+        error: { message: "Availability overlaps with existing slot" },
+      });
     }
 
     const av = await prisma.availabilities.create({
-      data: { psychologist_id: psyId, weekday, start_time: start, end_time: end },
+      data: {
+        psychologist_id: psyId,
+        weekday,
+        start_time: start,
+        end_time: end,
+      },
     });
 
     res.status(201).json({ availability: av });
   } catch (err: any) {
     const msg = err?.message || "Internal server error";
     if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
-      return res.status(503).json({ error: { message: "Database unavailable" } });
+      return res
+        .status(503)
+        .json({ error: { message: "Database unavailable" } });
     }
     return res.status(500).json({ error: { message: msg } });
   }
@@ -115,11 +130,16 @@ export async function createAvailabilityForPsy(req: Request, res: Response) {
 export async function updateAvailability(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Availability ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Availability ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
     const av = await prisma.availabilities.findUnique({ where: { id } });
-    if (!av) return res.status(404).json({ error: { message: "Availability not found" } });
+    if (!av)
+      return res
+        .status(404)
+        .json({ error: { message: "Availability not found" } });
 
     const actor = (req as any).user;
     if (!actorIsAdminOrOwner(actor, av.psychologist_id)) {
@@ -128,20 +148,28 @@ export async function updateAvailability(req: Request, res: Response) {
 
     const parsed = updateAvailabilitySchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(422)
-        .json({ error: { message: "Validation failed", issues: parsed.error.issues } });
+      return res.status(422).json({
+        error: { message: "Validation failed", issues: parsed.error.issues },
+      });
     }
     const { weekday, start_time, end_time } = parsed.data;
     if (weekday === undefined && !start_time && !end_time) {
-      return res.status(400).json({ error: { message: "No fields to update" } });
+      return res
+        .status(400)
+        .json({ error: { message: "No fields to update" } });
     }
 
     const nextWeekday = weekday ?? av.weekday;
-    const nextStart = start_time ? parseTimeToDate(start_time, "start_time") : av.start_time;
-    const nextEnd = end_time ? parseTimeToDate(end_time, "end_time") : av.end_time;
+    const nextStart = start_time
+      ? parseTimeToDate(start_time, "start_time")
+      : av.start_time;
+    const nextEnd = end_time
+      ? parseTimeToDate(end_time, "end_time")
+      : av.end_time;
     if (nextEnd <= nextStart) {
-      return res.status(400).json({ error: { message: "end_time must be after start_time" } });
+      return res
+        .status(400)
+        .json({ error: { message: "end_time must be after start_time" } });
     }
 
     // cek overlap (exclude dirinya sendiri)
@@ -153,9 +181,13 @@ export async function updateAvailability(req: Request, res: Response) {
       },
       select: { id: true, start_time: true, end_time: true },
     });
-    const hasOverlap = sameDay.some((a) => isOverlap(nextStart, nextEnd, a.start_time, a.end_time));
+    const hasOverlap = sameDay.some((a) =>
+      isOverlap(nextStart, nextEnd, a.start_time, a.end_time)
+    );
     if (hasOverlap) {
-      return res.status(409).json({ error: { message: "Availability overlaps with existing slot" } });
+      return res.status(409).json({
+        error: { message: "Availability overlaps with existing slot" },
+      });
     }
 
     const updated = await prisma.availabilities.update({
@@ -167,7 +199,9 @@ export async function updateAvailability(req: Request, res: Response) {
   } catch (err: any) {
     const msg = err?.message || "Internal server error";
     if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
-      return res.status(503).json({ error: { message: "Database unavailable" } });
+      return res
+        .status(503)
+        .json({ error: { message: "Database unavailable" } });
     }
     return res.status(500).json({ error: { message: msg } });
   }
@@ -177,11 +211,16 @@ export async function updateAvailability(req: Request, res: Response) {
 export async function deleteAvailability(req: Request, res: Response) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Availability ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Availability ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
     const av = await prisma.availabilities.findUnique({ where: { id } });
-    if (!av) return res.status(404).json({ error: { message: "Availability not found" } });
+    if (!av)
+      return res
+        .status(404)
+        .json({ error: { message: "Availability not found" } });
 
     const actor = (req as any).user;
     if (!actorIsAdminOrOwner(actor, av.psychologist_id)) {
@@ -193,19 +232,26 @@ export async function deleteAvailability(req: Request, res: Response) {
   } catch (err: any) {
     const msg = err?.message || "Internal server error";
     if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
-      return res.status(503).json({ error: { message: "Database unavailable" } });
+      return res
+        .status(503)
+        .json({ error: { message: "Database unavailable" } });
     }
     return res.status(500).json({ error: { message: msg } });
   }
 }
 
 // GET /psychologists/:id/availabilities (PUBLIC)
-export async function listPsychologistAvailabilities(req: Request, res: Response) {
+export async function listPsychologistAvailabilities(
+  req: Request,
+  res: Response
+) {
   try {
     if (!req.params.id)
-      return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+      return res
+        .status(400)
+        .json({ error: { message: "Psychologist ID is required" } });
 
-    const id = toBigInt(req.params.id);
+    const id = String(req.params.id);
 
     const items = await prisma.availabilities.findMany({
       where: { psychologist_id: id },
@@ -216,7 +262,9 @@ export async function listPsychologistAvailabilities(req: Request, res: Response
   } catch (err: any) {
     const msg = err?.message || "Internal server error";
     if (/Can't reach database server|ECONN|ENOTFOUND/i.test(msg)) {
-      return res.status(503).json({ error: { message: "Database unavailable" } });
+      return res
+        .status(503)
+        .json({ error: { message: "Database unavailable" } });
     }
     return res.status(500).json({ error: { message: msg } });
   }
