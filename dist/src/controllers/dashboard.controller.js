@@ -1,18 +1,24 @@
 import { prisma } from "../config/prisma.js";
+/* =========================
+ *  Helpers
+ * ========================= */
 function forbidIfNotOwnerOrAdmin(actor, psyId) {
-    return !(actor.role === "admin" ||
-        (actor.role === "psychologist" && actor.id === psyId));
+    return !(actor?.role === "admin" ||
+        (actor?.role === "psychologist" && actor?.id === psyId));
 }
+/* =========================
+ *  Controllers
+ * ========================= */
 // GET /psychologists/:id/dashboard
 export async function getPsychologistDashboard(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
+    if (!req.params.id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const psyId = String(req.params.id);
     const actor = req.user;
-    if (forbidIfNotOwnerOrAdmin(actor, psyId))
+    if (forbidIfNotOwnerOrAdmin(actor, psyId)) {
         return res.status(403).json({ error: { message: "Forbidden" } });
+    }
     const now = new Date();
     const [totalPatients, upcomingCount, paidSum, pendingPayments] = await Promise.all([
         prisma.consultations
@@ -34,12 +40,12 @@ export async function getPsychologistDashboard(req, res) {
             _sum: { amount: true },
             where: { consultation: { psychologist_id: psyId }, status: "paid" },
         })
-            .then((a) => a._sum.amount ?? 0),
+            .then((a) => Number(a._sum.amount ?? 0)),
         prisma.payments.count({
             where: { consultation: { psychologist_id: psyId }, status: "pending" },
         }),
     ]);
-    res.json({
+    return res.json({
         dashboard: {
             total_unique_patients: totalPatients,
             upcoming_sessions: upcomingCount,
@@ -50,14 +56,14 @@ export async function getPsychologistDashboard(req, res) {
 }
 // GET /psychologists/:id/consultations?status=scheduled
 export async function listPsychologistConsultationsByStatus(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
+    if (!req.params.id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const psyId = String(req.params.id);
     const actor = req.user;
-    if (forbidIfNotOwnerOrAdmin(actor, psyId))
+    if (forbidIfNotOwnerOrAdmin(actor, psyId)) {
         return res.status(403).json({ error: { message: "Forbidden" } });
+    }
     const { status } = req.query;
     const where = { psychologist_id: psyId };
     if (status)
@@ -67,18 +73,18 @@ export async function listPsychologistConsultationsByStatus(req, res) {
         orderBy: { scheduled_start_at: "asc" },
         include: { patient: true },
     });
-    res.json({ items });
+    return res.json({ items });
 }
 // GET /psychologists/:id/payments
 export async function getPsychologistPaymentsSummary(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
+    if (!req.params.id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const psyId = String(req.params.id);
     const actor = req.user;
-    if (forbidIfNotOwnerOrAdmin(actor, psyId))
+    if (forbidIfNotOwnerOrAdmin(actor, psyId)) {
         return res.status(403).json({ error: { message: "Forbidden" } });
+    }
     const [paid, failed, pending] = await Promise.all([
         prisma.payments.aggregate({
             _sum: { amount: true },
@@ -94,10 +100,10 @@ export async function getPsychologistPaymentsSummary(req, res) {
             where: { consultation: { psychologist_id: psyId }, status: "pending" },
         }),
     ]);
-    res.json({
+    return res.json({
         payments: {
             paid_count: paid._count,
-            paid_amount_sum: paid._sum.amount ?? 0,
+            paid_amount_sum: Number(paid._sum.amount ?? 0),
             failed_count: failed._count,
             pending_count: pending._count,
         },
@@ -105,14 +111,14 @@ export async function getPsychologistPaymentsSummary(req, res) {
 }
 // GET /psychologists/:id/intake-forms
 export async function listPsychologistIntakeFormsDash(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
+    if (!req.params.id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const psyId = String(req.params.id);
     const actor = req.user;
-    if (forbidIfNotOwnerOrAdmin(actor, psyId))
+    if (forbidIfNotOwnerOrAdmin(actor, psyId)) {
         return res.status(403).json({ error: { message: "Forbidden" } });
+    }
     const items = await prisma.intake_forms.findMany({
         where: { psychologist_id: psyId },
         orderBy: { created_at: "desc" },
@@ -125,19 +131,19 @@ export async function listPsychologistIntakeFormsDash(req, res) {
             goals_text: true,
         },
     });
-    res.json({ items });
+    return res.json({ items });
 }
 // GET /psychologists/:id/ai-reports
 export async function getPsychologistAiReports(req, res) {
-    if (!req.params.id)
-        return res
-            .status(400)
-            .json({ error: { message: "Psychologist ID is required" } });
+    if (!req.params.id) {
+        return res.status(400).json({ error: { message: "Psychologist ID is required" } });
+    }
     const psyId = String(req.params.id);
     const actor = req.user;
-    if (forbidIfNotOwnerOrAdmin(actor, psyId))
+    if (forbidIfNotOwnerOrAdmin(actor, psyId)) {
         return res.status(403).json({ error: { message: "Forbidden" } });
-    // Insight sederhana: distribusi risk_level dari ai_intake_analysis + ringkasan terbaru dari ai_consultation_notes
+    }
+    // Insight: distribusi risk_level dari ai_intake_analysis + ringkasan terbaru dari ai_consultation_notes
     const analyses = await prisma.ai_intake_analysis.findMany({
         where: { intake_form: { psychologist_id: psyId } },
         orderBy: { created_at: "desc" },
@@ -160,7 +166,7 @@ export async function getPsychologistAiReports(req, res) {
             created_at: true,
         },
     });
-    res.json({
+    return res.json({
         ai_reports: {
             risk_distribution: byLevel,
             latest_notes: latestNotes,

@@ -1,8 +1,13 @@
+// src/controllers/consultations.controller.ts
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
 import { createConsultationSchema } from "../validators/consultation.schema.js";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+/* =========================
+ * Helpers
+ * ========================= */
 function overlaps(startA: Date, endA: Date, startB: Date, endB: Date) {
   return startA < endB && startB < endA;
 }
@@ -26,10 +31,56 @@ function canSeeConsultation(
   return actorId === c.patient_id || actorId === c.psychologist_id;
 }
 
-// ---------------- Handlers ----------------
+/* =========================
+ * Response DTO Types
+ * ========================= */
+type ErrorResponse = { error: { message: string; issues?: unknown } };
+
+// Create
+type CreateConsultationDTO = Prisma.consultationsGetPayload<{}>;
+type CreateConsultationResponse = { consultation: CreateConsultationDTO };
+
+// List mine
+type ListMyConsultationItemDTO = Prisma.consultationsGetPayload<{
+  include: {
+    patient: true;
+    psychologist: { include: { user: true } };
+    payments: true;
+    review: true;
+    stream_channel: true;
+  };
+}>;
+type ListMyConsultationsResponse = { items: ListMyConsultationItemDTO[] };
+
+// Get by id
+type GetConsultationDTO = Prisma.consultationsGetPayload<{
+  include: {
+    patient: true;
+    psychologist: { include: { user: true } };
+    payments: true;
+    review: true;
+    stream_channel: true;
+  };
+}>;
+type GetConsultationResponse = { consultation: GetConsultationDTO };
+
+// Update
+type UpdateConsultationDTO = Prisma.consultationsGetPayload<{}>;
+type UpdateConsultationResponse = { consultation: UpdateConsultationDTO };
+
+// Cancel
+type CancelConsultationDTO = Prisma.consultationsGetPayload<{}>;
+type CancelConsultationResponse = { consultation: CancelConsultationDTO };
+
+/* =========================
+ * Handlers
+ * ========================= */
 
 // POST /consultations
-export async function createConsultation(req: Request, res: Response) {
+export async function createConsultation(
+  req: Request,
+  res: Response<CreateConsultationResponse | ErrorResponse>
+) {
   try {
     const actor = (req as any).user;
 
@@ -39,7 +90,6 @@ export async function createConsultation(req: Request, res: Response) {
         ? String(req.body.patient_id)
         : String(actor.id);
 
-    // validasi & coerce ID psy di schema kamu (schema boleh terima string/number)
     const parsed = createConsultationSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(422).json({
@@ -50,10 +100,11 @@ export async function createConsultation(req: Request, res: Response) {
 
     const psyId = String(body.psychologist_id);
     const psy = await prisma.psychologists.findUnique({ where: { id: psyId } });
-    if (!psy)
+    if (!psy) {
       return res
         .status(404)
         .json({ error: { message: "Psychologist not found" } });
+    }
 
     const start = new Date(body.scheduled_start_at);
     const end = new Date(body.scheduled_end_at);
@@ -93,7 +144,7 @@ export async function createConsultation(req: Request, res: Response) {
       },
     });
 
-    res.status(201).json({ consultation: c });
+    return res.status(201).json({ consultation: c });
   } catch (err: any) {
     return res
       .status(500)
@@ -102,12 +153,15 @@ export async function createConsultation(req: Request, res: Response) {
 }
 
 // GET /consultations (list milik user login)
-export async function listMyConsultations(req: Request, res: Response) {
+export async function listMyConsultations(
+  req: Request,
+  res: Response<ListMyConsultationsResponse | ErrorResponse>
+) {
   try {
     const u = (req as any).user;
     const uid = String(u.id);
 
-    const where =
+    const where: Prisma.consultationsWhereInput =
       u.role === "psychologist"
         ? { psychologist_id: uid }
         : u.role === "patient"
@@ -126,7 +180,7 @@ export async function listMyConsultations(req: Request, res: Response) {
       },
     });
 
-    res.json({ items });
+    return res.json({ items });
   } catch (err: any) {
     return res
       .status(500)
@@ -135,12 +189,16 @@ export async function listMyConsultations(req: Request, res: Response) {
 }
 
 // GET /consultations/:id
-export async function getConsultationById(req: Request, res: Response) {
+export async function getConsultationById(
+  req: Request,
+  res: Response<GetConsultationResponse | ErrorResponse>
+) {
   try {
-    if (!req.params.id)
+    if (!req.params.id) {
       return res
         .status(400)
         .json({ error: { message: "Consultation ID is required" } });
+    }
 
     const id = String(req.params.id);
     const c = await prisma.consultations.findUnique({
@@ -153,17 +211,18 @@ export async function getConsultationById(req: Request, res: Response) {
         stream_channel: true,
       },
     });
-    if (!c)
+    if (!c) {
       return res
         .status(404)
         .json({ error: { message: "Consultation not found" } });
+    }
 
     const actor = (req as any).user;
     if (!canSeeConsultation(actor, c)) {
       return res.status(403).json({ error: { message: "Forbidden" } });
     }
 
-    res.json({ consultation: c });
+    return res.json({ consultation: c });
   } catch (err: any) {
     return res
       .status(500)
@@ -172,22 +231,26 @@ export async function getConsultationById(req: Request, res: Response) {
 }
 
 // PUT /consultations/:id  (ubah status/jadwal) -> admin atau psy pemilik
-// PUT /consultations/:id  (ubah status/jadwal) -> admin atau psy pemilik
-export async function updateConsultation(req: Request, res: Response) {
+export async function updateConsultation(
+  req: Request,
+  res: Response<UpdateConsultationResponse | ErrorResponse>
+) {
   try {
-    if (!req.params.id)
+    if (!req.params.id) {
       return res
         .status(400)
         .json({ error: { message: "Consultation ID is required" } });
+    }
 
     const id = String(req.params.id);
     const actor = (req as any).user;
 
     const current = await prisma.consultations.findUnique({ where: { id } });
-    if (!current)
+    if (!current) {
       return res
         .status(404)
         .json({ error: { message: "Consultation not found" } });
+    }
 
     const actorId = String(actor.id);
     if (
@@ -197,9 +260,9 @@ export async function updateConsultation(req: Request, res: Response) {
       return res.status(403).json({ error: { message: "Forbidden" } });
     }
 
-    const data: any = { updated_at: new Date() };
+    const data: Prisma.consultationsUpdateInput = { updated_at: new Date() };
 
-    // --- Validasi status HANYA kalau dikirim ---
+    // Validasi status (opsional)
     const statusVal = (req.body as any)?.status;
     if (statusVal !== undefined) {
       const parsed = StatusEnum.safeParse(statusVal);
@@ -208,10 +271,10 @@ export async function updateConsultation(req: Request, res: Response) {
           error: { message: "Invalid status", issues: parsed.error.issues },
         });
       }
-      data.status = parsed.data;
+      (data as any).status = parsed.data; // cast: Prisma enum already matches
     }
 
-    // --- Update jadwal (opsional) ---
+    // Update jadwal (opsional)
     const { scheduled_start_at, scheduled_end_at } = req.body as {
       scheduled_start_at?: string;
       scheduled_end_at?: string;
@@ -244,12 +307,12 @@ export async function updateConsultation(req: Request, res: Response) {
           .json({ error: { message: "Schedule conflict" } });
       }
 
-      data.scheduled_start_at = start;
-      data.scheduled_end_at = end;
+      (data as any).scheduled_start_at = start;
+      (data as any).scheduled_end_at = end;
     }
 
     const updated = await prisma.consultations.update({ where: { id }, data });
-    res.json({ consultation: updated });
+    return res.json({ consultation: updated });
   } catch (err: any) {
     return res
       .status(500)
@@ -258,21 +321,26 @@ export async function updateConsultation(req: Request, res: Response) {
 }
 
 // DELETE /consultations/:id  -> admin atau patient pemilik
-export async function cancelConsultation(req: Request, res: Response) {
+export async function cancelConsultation(
+  req: Request,
+  res: Response<CancelConsultationResponse | ErrorResponse>
+) {
   try {
-    if (!req.params.id)
+    if (!req.params.id) {
       return res
         .status(400)
         .json({ error: { message: "Consultation ID is required" } });
+    }
 
     const id = String(req.params.id);
     const actor = (req as any).user;
 
     const c = await prisma.consultations.findUnique({ where: { id } });
-    if (!c)
+    if (!c) {
       return res
         .status(404)
         .json({ error: { message: "Consultation not found" } });
+    }
 
     const actorId = String(actor.id);
     if (!(actor.role === "admin" || actorId === c.patient_id)) {
@@ -283,7 +351,7 @@ export async function cancelConsultation(req: Request, res: Response) {
       where: { id },
       data: { status: "cancelled", updated_at: new Date() },
     });
-    res.json({ consultation: updated });
+    return res.json({ consultation: updated });
   } catch (err: any) {
     return res
       .status(500)
